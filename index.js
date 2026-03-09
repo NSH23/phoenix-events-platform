@@ -63,7 +63,7 @@ async function saveVoiceCall(data) {
       gathered_event_type: data.event_type,
       gathered_venue: data.venue_name,
       gathered_guest_count: data.guest_count,
-      gathered_event_date: data.event_date,
+      gathered_event_date: data.event_date || null,
       whatsapp_sent: false
     });
     console.log('Voice call saved for ' + data.phone);
@@ -190,8 +190,8 @@ app.post('/phoenix-bolna-agent', async function(req, res) {
   console.log('Status:', body && body.status);
   console.log('User number:', body && body.user_number);
 
-  // ── CASE 1: Completed or disconnected call from Analytics webhook ──
-  if (body && (body.status === 'completed' || body.status === 'call-disconnected') && body.user_number) {
+  // ── CASE 1: Completed call from Analytics webhook ──
+  if (body && body.status === 'completed' && body.user_number) {
     var phone = body.user_number.replace('+', '').replace(/\s/g, '');
     var transcript = body.transcript || '';
 
@@ -206,9 +206,11 @@ app.post('/phoenix-bolna-agent', async function(req, res) {
       extracted.name = extractions.customer_name || extracted.name;
       extracted.event_type = extractions.event_type || extracted.event_type;
       extracted.venue_booked = extractions.venue_booked || extracted.venue_booked;
-      extracted.venue_name = extractions.venue_name || extracted.venue_name;
+      var vn = extractions.venue_name;
+      extracted.venue_name = (vn && typeof vn === 'string') ? vn : extracted.venue_name;
       extracted.guest_count = extractions.guest_count || extracted.guest_count;
-      extracted.event_date = extractions.event_date || extracted.event_date;
+      var ed = extractions.event_date;
+      extracted.event_date = (ed && typeof ed === 'string') ? ed : extracted.event_date;
     }
 
     var data = {
@@ -216,9 +218,9 @@ app.post('/phoenix-bolna-agent', async function(req, res) {
       name: extracted.name || 'Guest',
       event_type: extracted.event_type || '',
       venue_booked: extracted.venue_booked || false,
-      venue_name: extracted.venue_name || '',
+      venue_name: (extracted.venue_name && typeof extracted.venue_name === 'string') ? extracted.venue_name : '',
       guest_count: extracted.guest_count || '',
-      event_date: extracted.event_date || ''
+      event_date: (extracted.event_date && extracted.event_date !== '') ? extracted.event_date : null
     };
 
     console.log('Extracted data:', JSON.stringify(data));
