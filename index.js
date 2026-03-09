@@ -55,6 +55,17 @@ async function getEventImage(eventType) {
   } catch (e) { return null; }
 }
 
+
+function parseGuestCount(val) {
+  if (!val) return null;
+  var s = String(val).toLowerCase().trim();
+  // Hindi word mappings
+  var hindiMap = {"एक सौ":100,"दो सौ":200,"तीन सौ":300,"चार सौ":400,"पांच सौ":500,"छह सौ":600,"सात सौ":700,"आठ सौ":800,"नौ सौ":900,"पचास":50,"सौ":100,"दो सौ पचास":250,"तीन सौ पचास":350};
+  for (var k in hindiMap) { if (s.indexOf(k) !== -1) return hindiMap[k]; }
+  if (s.indexOf("hundred") !== -1) { var m = s.match(/(d+)s*hundred/); return m ? parseInt(m[1])*100 : 100; }
+  var n = parseInt(s.replace(/[^0-9]/g,""));
+  return isNaN(n) ? null : n;
+}
 async function saveVoiceCall(data) {
   try {
     await supabase.post('/rest/v1/voice_calls', {
@@ -64,7 +75,7 @@ async function saveVoiceCall(data) {
       call_status: 'completed',
       gathered_event_type: data.event_type,
       gathered_venue: data.venue_name,
-      gathered_guest_count: data.guest_count,
+      gathered_guest_count: parseGuestCount(data.guest_count),
       gathered_event_date: data.event_date || null,
       whatsapp_sent: false
     });
@@ -132,49 +143,17 @@ function extractFromTranscript(transcript) {
 }
 
 async function handleWhatsAppFlow(data) {
-  console.log('Starting WA flow:', JSON.stringify(data));
-  await saveVoiceCall(data);
-  await updateLead(data.phone, data.event_type);
+  console.log("Starting WA flow:", JSON.stringify(data));
 
-  if (data.venue_booked === true || data.venue_booked === 'true') {
-    await sendWhatsApp(data.phone,
-      '🎉 ' + data.name + ' ji!\n\nPhoenix Events mein aapka swagat hai!\n\n' +
-      '🎊 Event: ' + data.event_type + '\n🏛️ Venue: ' + (data.venue_name || 'Aapka selected venue') + '\n\n' +
-      'Hum abhi aapke venue ke liye hamare kaam ki images bhej rahe hain!\n\n' +
-      'Hamara specialist 5 ghante mein contact karega.\n🌐 phoenixeventsandproduction.com');
-  } else {
-    await sendWhatsApp(data.phone,
-      '🏛️ ' + data.name + ' ji!\n\nPhoenix Events ke saath aapki baat achi lagi! 😊\n\n' +
-      'Hamare 7 premium partner venues Pimpri-Chinchwad mein:\n\n' +
-      '1️⃣ Sky Blue Banquet Hall — Ravet ⭐4.7\n' +
-      '2️⃣ Thopate Banquets — Rahatani\n' +
-      '3️⃣ Blue Water Banquet Hall — Punawale ⭐5.0\n' +
-      '4️⃣ RamKrishna Veg Banquet — Ravet ⭐4.4\n' +
-      '5️⃣ Shree Krishna Palace — Pimpri ⭐4.3\n' +
-      '6️⃣ Raghunandan AC Banquet — Tathawade ⭐4.0\n' +
-      '7️⃣ Rangoli Banquet Hall — Chinchwad ⭐4.3\n\n' +
-      'Inme se koi pasand aaye toh batao! 🎊\n\n🌐 phoenixeventsandproduction.com');
-  }
+  var msg = "Hi " + (data.name || "Guest") + "! Phoenix Events yahan se message kar raha hai.\n\n" +
+    "Aapne call mein bataya:\n" +
+    "Event: " + (data.event_type || "not mentioned") + "\n" +
+    "Guests: " + (data.guest_count || "not mentioned") + "\n" +
+    "Date: " + (data.event_date || "not mentioned") + "\n\n" +
+    "Hamara team jald hi aapko contact karega!";
 
-  if (data.event_type) {
-    var imageUrl = await getEventImage(data.event_type);
-    if (imageUrl) {
-      await sendWhatsAppImage(data.phone, imageUrl,
-        data.event_type + ' ke liye hamare kaam ki jhalak! Aisa hi banayenge hum aapka event!');
-    }
-  }
-
-  await sendWhatsApp(data.phone,
-    '✨ ' + data.name + ' ji, Phoenix Events mein aapka swagat hai!\n\n' +
-    'Aapki details:\n' +
-    '🎊 Event: ' + (data.event_type || 'TBD') + '\n' +
-    '👥 Guests: ' + (data.guest_count || 'TBD') + '\n' +
-    '📅 Date: ' + (data.event_date || 'TBD') + '\n\n' +
-    'Hamara specialist 5 ghante mein aapko call karega! 🎉\n\n' +
-    '🌐 phoenixeventsandproduction.com');
-
-  await markWhatsAppSent(data.phone);
-  console.log('WA flow complete for ' + data.phone);
+  await sendWhatsApp(data.phone, msg);
+  console.log("WA flow complete for " + data.phone);
 }
 
 app.get('/', function(req, res) {
