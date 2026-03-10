@@ -143,17 +143,61 @@ function extractFromTranscript(transcript) {
 }
 
 async function handleWhatsAppFlow(data) {
-  console.log("Starting WA flow:", JSON.stringify(data));
+  console.log('Starting WA flow:', JSON.stringify(data));
 
-  var msg = "Hi " + (data.name || "Guest") + "! Phoenix Events yahan se message kar raha hai.\n\n" +
-    "Aapne call mein bataya:\n" +
-    "Event: " + (data.event_type || "not mentioned") + "\n" +
-    "Guests: " + (data.guest_count || "not mentioned") + "\n" +
-    "Date: " + (data.event_date || "not mentioned") + "\n\n" +
-    "Hamara team jald hi aapko contact karega!";
+  // Step 1: Save to DB (never blocks WhatsApp)
+  try { await saveVoiceCall(data); } catch(e) { console.error('saveVoiceCall failed:', e.message); }
+  try { await updateLead(data.phone, data.event_type); } catch(e) { console.error('updateLead failed:', e.message); }
 
-  await sendWhatsApp(data.phone, msg);
-  console.log("WA flow complete for " + data.phone);
+  // Step 2: WhatsApp message 1 - venue list or booking confirm
+  if (data.venue_booked === true || data.venue_booked === 'true') {
+    await sendWhatsApp(data.phone,
+      '🎉 ' + data.name + ' ji!\n\nPhoenix Events mein aapka swagat hai!\n\n' +
+      '🎊 Event: ' + data.event_type + '\n' +
+      '🏛️ Venue: ' + (data.venue_name || 'Aapka selected venue') + '\n' +
+      '👥 Guests: ' + (data.guest_count || 'TBD') + '\n' +
+      '📅 Date: ' + (data.event_date || 'TBD') + '\n\n' +
+      'Hamara specialist 5 ghante mein aapko call karega!\n\n' +
+      '🌐 phoenixeventsandproduction.com');
+  } else {
+    await sendWhatsApp(data.phone,
+      '🏛️ ' + data.name + ' ji!\n\nPhoenix Events ke saath aapki baat achi lagi! 😊\n\n' +
+      'Hamare 7 premium partner venues Pimpri-Chinchwad mein:\n\n' +
+      '1️⃣ Sky Blue Banquet Hall — Ravet ⭐4.7\n' +
+      '2️⃣ Thopate Banquets — Rahatani\n' +
+      '3️⃣ Blue Water Banquet Hall — Punawale ⭐5.0\n' +
+      '4️⃣ RamKrishna Veg Banquet — Ravet ⭐4.4\n' +
+      '5️⃣ Shree Krishna Palace — Pimpri ⭐4.3\n' +
+      '6️⃣ Raghunandan AC Banquet — Tathawade ⭐4.0\n' +
+      '7️⃣ Rangoli Banquet Hall — Chinchwad ⭐4.3\n\n' +
+      'Inme se koi pasand aaye toh batao! 🎊\n\n' +
+      '🌐 phoenixeventsandproduction.com');
+  }
+
+  // Step 3: Event image (optional)
+  try {
+    if (data.event_type) {
+      var imageUrl = await getEventImage(data.event_type);
+      if (imageUrl) {
+        await sendWhatsAppImage(data.phone, imageUrl,
+          data.event_type + ' ke liye hamare kaam ki jhalak!');
+      }
+    }
+  } catch(e) { console.error('Image failed:', e.message); }
+
+  // Step 4: Summary message
+  await sendWhatsApp(data.phone,
+    '✨ ' + data.name + ' ji, yeh rahi aapki details:\n\n' +
+    '🎊 Event: ' + (data.event_type || 'TBD') + '\n' +
+    '👥 Guests: ' + (data.guest_count || 'TBD') + '\n' +
+    '📅 Date: ' + (data.event_date || 'TBD') + '\n\n' +
+    'Hamara specialist 5 ghante mein aapko call karega! 🎉\n\n' +
+    '🌐 phoenixeventsandproduction.com');
+
+  // Step 5: Mark sent
+  try { await markWhatsAppSent(data.phone); } catch(e) {}
+
+  console.log('WA flow complete for ' + data.phone);
 }
 
 app.get('/', function(req, res) {
