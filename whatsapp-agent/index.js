@@ -274,19 +274,20 @@ async function callClaude(phone, userMessage, lead, history, knowledgeBase) {
   if (lead) {
     var hasName = lead.name && lead.name !== 'Friend' && lead.name !== 'Guest';
     var hasEvent = lead.event_type && lead.event_type !== 'Unknown';
-    leadContext = 'RETURNING CUSTOMER — yeh pehle baat kar chuke hain. Inhe naam se greet kar warmly.\n\n' +
-      'Saved Data:\n' +
-      '- Naam: ' + (hasName ? lead.name : 'Pata nahi (poocho)') + '\n' +
-      '- Event: ' + (hasEvent ? lead.event_type : 'Pata nahi (poocho)') + '\n' +
-      '- Venue Interest: ' + (lead.venue || 'Discuss nahi hua') + '\n' +
-      '- Guest Count: ' + (lead.guest_count || 'Pata nahi') + '\n' +
-      '- Event Date: ' + (lead.event_date || 'Pata nahi') + '\n' +
-      '- Calls: ' + (lead.call_count || 0) + ' | WA Messages: ' + (lead.whatsapp_count || 0) + '\n' +
-      '- Status: ' + (lead.status || 'new') + '\n\n' +
-      'Greeting example: "Heyy ' + (hasName ? lead.name : '') + '! 😊 Wapas aaye, achha laga!\n' +
-      (hasEvent ? 'Pehle ' + lead.event_type + ' plan kar rahe the — kya update hai?" ' : 'Kya plan kar rahe ho aaj?"
-') +
-      '\nIMPORTANT: Previous data gently verify karo — assume mat karo ki sab same hai.';
+    var greetingEx = hasName
+      ? ('Heyy ' + lead.name + '! Wapas aaye, achha laga! ' + (hasEvent ? 'Pehle ' + lead.event_type + ' plan kar rahe the — kya update hai?' : 'Kya plan kar rahe ho aaj?'))
+      : 'Heyy! Wapas aaye, achha laga! Kya plan kar rahe ho aaj?';
+    leadContext = 'RETURNING CUSTOMER — yeh pehle baat kar chuke hain. Inhe naam se greet kar warmly.' +
+      '\n\nSaved Data:' +
+      '\n- Naam: ' + (hasName ? lead.name : 'Pata nahi (poocho)') +
+      '\n- Event: ' + (hasEvent ? lead.event_type : 'Pata nahi (poocho)') +
+      '\n- Venue Interest: ' + (lead.venue || 'Discuss nahi hua') +
+      '\n- Guest Count: ' + (lead.guest_count || 'Pata nahi') +
+      '\n- Event Date: ' + (lead.event_date || 'Pata nahi') +
+      '\n- Calls: ' + (lead.call_count || 0) + ' | WA Messages: ' + (lead.whatsapp_count || 0) +
+      '\n- Status: ' + (lead.status || 'new') +
+      '\n\nGreeting example: ' + greetingEx +
+      '\n\nIMPORTANT: Previous data gently verify karo — assume mat karo ki sab same hai.';
   } else {
     leadContext = 'NEW CUSTOMER — pehli baar baat ho rahi hai. Warmly greet karo aur poochho kya plan kar rahe hain.';
   }
