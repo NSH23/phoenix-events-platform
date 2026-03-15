@@ -236,65 +236,107 @@ async function sendWhatsAppImage(phone, imageUrl, caption) {
 
 async function handleHandoffFlow(data) {
   console.log('Handoff WA flow for:', data.phone);
-  var name = data.name || 'Friend';
+  var name = (data.name && data.name !== 'Guest' && data.name !== 'Unknown') ? data.name : '';
   var ev = data.event_type || '';
   var venue = data.venue_name || '';
+  var venueBooked = data.venue_booked === true || data.venue_booked === 'true';
 
-  // 1. Warm greeting referencing the call
-  var greeting = '*' + name + '* ji! 😊 Main Aishwarya hoon — Phoenix Events se.\n\n';
-  if (ev && venue) {
-    greeting += 'Abhi call pe *' + ev + '* aur *' + venue + '* ke baare mein baat hui — kuch khoobsurat cheezein share karna chahti thi! ✨';
-  } else if (ev) {
-    greeting += 'Abhi call pe *' + ev + '* ke baare mein baat hui — hamare kuch beautiful kaam ki jhalak bhejti hoon! ✨';
+  // 1. Warm greeting — reference the call, mention WA message + images/videos coming
+  var greeting = '';
+  if (name) greeting += '*' + name + '* ji! 😊\n\n';
+  greeting += 'Main Aishwarya hoon — Phoenix Events & Production se. Abhi aapse call pe baat hui!\n\n';
+  if (ev) {
+    greeting += 'Aapke *' + ev + '* event ke liye hamare kuch khoobsurat kaam ki jhalak aur venue ki photos/videos abhi bhej rahi hoon WhatsApp pe! 📸✨\n\n';
   } else {
-    greeting += 'Call ke baad WhatsApp pe bhi aa gayi — yahan bhi available hoon! 😊 Phoenix Events ke kuch kaam ki jhalak bhejti hoon ✨';
+    greeting += 'Phoenix Events ke kuch khoobsurat kaam ki photos aur videos abhi bhej rahi hoon! 📸✨\n\n';
   }
+  greeting += 'Aur hamare specialist *jald hi* personally aapko call karenge — yeh hamaara vaada hai! 🙏';
   await sendWhatsApp(data.phone, greeting);
   await sleep(1500);
 
-  // 2. Event portfolio image
+  // 2. Event portfolio image — always send if event type known
   if (ev) {
     var eImg = await getEventImage(ev);
-    if (eImg) { await sendWhatsAppImage(data.phone, eImg, '🎊 Hamare ' + ev + ' events ke kuch beautiful moments!'); await sleep(1000); }
-  }
-
-  // 3. Venue image
-  if (venue) {
-    var vi = getVenueIndex(venue);
-    if (vi) {
-      var vImg = await getMediaByKey('venue_' + vi + '_image');
-      if (vImg) { await sleep(800); await sendWhatsAppImage(data.phone, vImg, '🏛️ ' + venue + ' — aapke event ke liye perfect!'); await sleep(800); }
+    if (eImg) {
+      await sendWhatsAppImage(data.phone, eImg, '🎊 Hamare ' + ev + ' events — aisa banate hain hum! ✨');
+      await sleep(1000);
+    } else {
+      // No image uploaded yet — send text appreciation instead
+      await sendWhatsApp(data.phone,
+        '🎊 *' + ev + ' events* mein hum kya karte hain:\n' +
+        '✨ Custom theme decoration\n' +
+        '📸 Professional photography & videography\n' +
+        '🎵 DJ & sound systems\n' +
+        '💡 Stage & lighting setup\n' +
+        '🌸 Full floral decoration\n\n' +
+        'Aur bhi bohot kuch — sab aapke sapnon ke hisaab se! 😊'
+      );
+      await sleep(1000);
     }
   }
 
-  // 4. Venue list if not booked
-  if (!data.venue_booked || data.venue_booked === 'false' || data.venue_booked === false) {
+  // 3. Venue section — logic based on whether venue is booked or not
+  if (venueBooked && venue) {
+    // Already booked a venue — send their venue image + appreciation
+    var vi = getVenueIndex(venue);
+    if (vi) {
+      var vImg = await getMediaByKey('venue_' + vi + '_image');
+      if (vImg) {
+        await sleep(800);
+        await sendWhatsAppImage(data.phone, vImg, '🏛️ ' + venue + ' — yahan hum kya kar sakte hain dekho! ✨');
+        await sleep(800);
+      }
+    }
     await sendWhatsApp(data.phone,
-      '🏛️ *Hamare 7 Premium Partner Venues — Pimpri-Chinchwad:*\n\n' +
-      '1️⃣ *Sky Blue Banquet Hall* — Ravet ⭐ 4.7 | 100-500 guests\n' +
-      '2️⃣ *Blue Water Banquet Hall* — Punawale ⭐ 5.0 | 50-300 guests\n' +
-      '3️⃣ *Thopate Banquets* — Rahatani | 100-400 guests\n' +
-      '4️⃣ *RamKrishna Veg Banquet* — Ravet ⭐ 4.4 | 50-250 guests\n' +
-      '5️⃣ *Shree Krishna Palace* — Pimpri Colony ⭐ 4.3 | 100-600 guests\n' +
-      '6️⃣ *Raghunandan AC Banquet* — Tathawade ⭐ 4.0 | 100-350 guests\n' +
-      '7️⃣ *Rangoli Banquet Hall* — Chinchwad ⭐ 4.3 | 100-500 guests\n\n' +
-      'Kisi bhi venue ki photos chahiye? Bas batao! 😊'
+      '🏛️ *' + venue + '* — ek bohot accha choice hai! 👌\n\n' +
+      'Hamare specialist is venue ke saath kaam kar chuke hain — aapka event yahan bhi yaaadgaar banayenge! 😊'
     );
     await sleep(1000);
+  } else {
+    // Venue not booked — send full venue list + mention location-based suggestion
+    await sendWhatsApp(data.phone,
+      '🏛️ *Hamare 7 Premium Partner Venues — Pimpri-Chinchwad, Pune:*\n\n' +
+      '1️⃣ *Sky Blue Banquet Hall* ⭐ 4.7\n' +
+      '📍 Punawale/Ravet | 100–500 guests\n\n' +
+      '2️⃣ *Blue Water Banquet Hall* ⭐ 5.0\n' +
+      '📍 Punawale | 50–300 guests\n\n' +
+      '3️⃣ *Thopate Banquets*\n' +
+      '📍 Rahatani | 100–400 guests\n\n' +
+      '4️⃣ *RamKrishna Veg Banquet* ⭐ 4.4 🌱\n' +
+      '📍 Ravet | 50–250 guests (Pure Veg)\n\n' +
+      '5️⃣ *Shree Krishna Palace* ⭐ 4.3\n' +
+      '📍 Pimpri Colony | 100–600 guests\n\n' +
+      '6️⃣ *Raghunandan AC Banquet* ⭐ 4.0\n' +
+      '📍 Tathawade | 100–350 guests\n\n' +
+      '7️⃣ *Rangoli Banquet Hall* ⭐ 4.3\n' +
+      '📍 Chinchwad | 100–500 guests\n\n' +
+      'Kisi bhi venue ki zyada jaankari ya photos chahiye? Bas naam batao! 😊'
+    );
+    await sleep(1200);
+
+    // Send images of first 2 venues as preview
+    var img1 = await getMediaByKey('venue_1_image');
+    if (img1) { await sendWhatsAppImage(data.phone, img1, '✨ Sky Blue Banquet Hall — Punawale/Ravet ⭐ 4.7'); await sleep(800); }
+    var img2 = await getMediaByKey('venue_3_image');
+    if (img2) { await sendWhatsAppImage(data.phone, img2, '✨ Blue Water Banquet Hall — Punawale ⭐ 5.0'); await sleep(800); }
   }
 
-  // 5. Details summary + specialist CTA
-  var d = '✅ *Call mein jo baat hui, woh save kar li hai:*\n\n';
-  if (ev) d += '🎊 *Event:* ' + ev + '\n';
-  if (data.guest_count) d += '👥 *Guests:* ' + data.guest_count + '\n';
-  if (data.event_date) d += '📅 *Date:* ' + data.event_date + '\n';
-  if (venue) d += '🏛️ *Venue:* ' + venue + '\n';
+  // 4. Details summary + specialist CTA + vaada
+  var d = '✅ *Call mein jo details save ki hain:*\n\n';
+  if (ev)                  d += '🎊 *Event:* ' + ev + '\n';
+  if (data.guest_count)    d += '👥 *Guests:* ' + data.guest_count + '\n';
+  if (data.event_date)     d += '📅 *Date:* ' + data.event_date + '\n';
+  if (venue)               d += '🏛️ *Venue:* ' + venue + '\n';
   if (data.services_needed) d += '✨ *Services:* ' + data.services_needed + '\n';
-  if (data.package_type) d += '📦 *Package:* ' + data.package_type.charAt(0).toUpperCase() + data.package_type.slice(1) + '\n';
+  if (data.package_type)   d += '📦 *Package:* ' + data.package_type.charAt(0).toUpperCase() + data.package_type.slice(1) + '\n';
   if (data.preferred_call_time) d += '📞 *Callback time:* ' + data.preferred_call_time + '\n';
-  d += '\nHamare specialist *jald* aapko call karenge! 🙏\n\n' +
-    'Tab tak — koi bhi sawaal ho, kuch dekhna ho, ya aur details share karni ho — bas yahan message karo! Main yahan hoon 😊\n\n' +
-    '📞 *+91 80357 35856*\n🌐 phoenixeventsandproduction.com\n📸 @phoenix_events_and_production';
+  if (data.city)           d += '📍 *City/Area:* ' + data.city + '\n';
+  d += '\n';
+  d += 'Hamare specialist *jald hi* aapko personally call karenge — *yeh hamaara vaada hai!* 🙏\n\n';
+  d += 'Tab tak agar koi bhi sawaal ho, koi venue ki photo dekhni ho, ya koi bhi baat karni ho — bas yahan message karo! Main hamesha available hoon 😊\n\n';
+  d += '📞 *+91 80357 35856*\n';
+  d += '🌐 phoenixeventsandproduction.com\n';
+  d += '📸 @phoenix_events_and_production';
 
   await sendWhatsApp(data.phone, d);
 
@@ -327,9 +369,38 @@ app.post('/phoenix-bolna-agent', async function(req, res) {
   var body = req.body;
   if (typeof body === 'string') { try { body = JSON.parse(body); } catch (e) {} }
 
-  var status = cleanVal(body && body.status);
-  var userNumber = cleanVal(body && (body.user_number || body.from || body.phone));
-  var toolName = cleanVal(body && (body.name || body.tool_name || (body.tool_call && body.tool_call.name) || (body.function && body.function.name) || (body.task && body.task.name)));
+  // Log full payload so we can see exactly what Bolna sends
+  console.log('BODY KEYS:', body ? Object.keys(body) : 'empty');
+  console.log('BODY PREVIEW:', JSON.stringify(body).substring(0, 600));
+
+  // Bolna wraps some events inside a "message" object
+  var msg = (body && body.message) || {};
+
+  var status = cleanVal(
+    (body && body.status) ||
+    (body && body.type) ||
+    (msg && msg.type) ||
+    ''
+  );
+
+  var userNumber = cleanVal(
+    (body && body.user_number) ||
+    (body && body.from) ||
+    (body && body.phone) ||
+    (msg && msg.call && msg.call.customer && msg.call.customer.number) ||
+    (body && body.call && body.call.customer && body.call.customer.number) ||
+    ''
+  );
+
+  var toolName = cleanVal(
+    (body && body.name) ||
+    (body && body.tool_name) ||
+    (body && body.tool_call && body.tool_call.name) ||
+    (body && body.function && body.function.name) ||
+    (body && body.task && body.task.name) ||
+    (msg && msg.tool_call && msg.tool_call.name) ||
+    ''
+  );
 
   console.log('Tool:', toolName, '| Status:', status, '| User:', userNumber);
 
@@ -381,7 +452,7 @@ app.post('/phoenix-bolna-agent', async function(req, res) {
         catering_needed: args2 && args2.catering_needed, duration_seconds: 0
       }).catch(function(e) { console.error('mid-call save error:', e.message); });
     }
-    return res.json({ result: 'Saved. Continue the conversation.' });
+    return res.json({ result: 'Haan, save ho gaya. Aage baat karein.' });
   }
 
   // ── Call completed ──
