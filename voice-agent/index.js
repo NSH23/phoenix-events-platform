@@ -361,7 +361,7 @@ function extractFromTranscript(transcript) {
 }
 
 // ── ROUTES ──
-app.get('/', function(req, res) { res.json({ status: 'Phoenix Events Voice Agent VERSION 8', timestamp: new Date().toISOString() }); });
+app.get('/', function(req, res) { res.json({ status: 'Phoenix Events Voice Agent VERSION 10', timestamp: new Date().toISOString() }); });
 app.get('/phoenix-bolna-agent', function(req, res) { res.json({ status: 'webhook active', version: 8 }); });
 
 app.post('/phoenix-bolna-agent', async function(req, res) {
@@ -383,14 +383,23 @@ app.post('/phoenix-bolna-agent', async function(req, res) {
     ''
   );
 
+  // userNumber = the CALLER's mobile number (not the Plivo/agent number)
+  // Bolna sends caller in: user_number, from, call.customer.number, message.call.customer.number
+  // body.to = the Plivo number (agent side) — NEVER use this
   var userNumber = cleanVal(
     (body && body.user_number) ||
     (body && body.from) ||
-    (body && body.phone) ||
     (msg && msg.call && msg.call.customer && msg.call.customer.number) ||
     (body && body.call && body.call.customer && body.call.customer.number) ||
+    (body && body.caller_number) ||
+    (body && body.caller) ||
     ''
   );
+  // Extra safety: if userNumber looks like our Plivo number, ignore it
+  // Our Plivo number is +918035735856 / 918035735856
+  if (userNumber === '918035735856' || userNumber === '8035735856') {
+    userNumber = '';
+  }
 
   var toolName = cleanVal(
     (body && body.name) ||
@@ -531,4 +540,4 @@ app.post('/phoenix-bolna-agent', async function(req, res) {
 });
 
 var PORT = process.env.PORT || 8080;
-app.listen(PORT, function() { console.log('Phoenix Events Voice Agent VERSION 8 running on port ' + PORT); });
+app.listen(PORT, function() { console.log('Phoenix Events Voice Agent VERSION 10 running on port ' + PORT); });
