@@ -20,7 +20,6 @@ const supabase = axios.create({
   }
 });
 
-// ── DEDUPLICATION ──
 var processedMessages = new Set();
 function isDuplicate(msgId) {
   if (!msgId) return false;
@@ -39,7 +38,6 @@ function splitMessage(text) {
   return chunks;
 }
 
-// ── WA SEND ──
 async function sendText(phone, message) {
   try {
     var fp = phone.startsWith('+') ? phone : '+' + phone;
@@ -66,7 +64,6 @@ async function sendImage(phone, imageUrl, caption) {
   } catch (e) { console.error('sendImage FAILED:', JSON.stringify(e.response ? e.response.data : e.message)); }
 }
 
-// NEW: send video via WhatsApp
 async function sendVideo(phone, videoUrl, caption) {
   try {
     if (!videoUrl) return;
@@ -78,7 +75,6 @@ async function sendVideo(phone, videoUrl, caption) {
   } catch (e) { console.error('sendVideo FAILED:', JSON.stringify(e.response ? e.response.data : e.message)); }
 }
 
-// ── SUPABASE ──
 async function getLead(phone) {
   try {
     var res = await supabase.get('/rest/v1/leads?phone=eq.' + phone + '&select=*');
@@ -151,162 +147,86 @@ async function getKnowledgeBase() {
   } catch (e) { return []; }
 }
 
-// Map Groq keys → canonical event/venue base keys
-// Canonical base keys are:
-//   event_{type}   (we will expand to event_{type}_image_1..4 & event_{type}_video_1..2)
-//   venue_{1-7}    (we will expand to venue_{i}_image_1..4 & venue_{i}_video_1..2)
 var VENUE_KEY_MAP = {
-  // Venues → venue_{index}
-  'sky_blue_banquet_hall_image': 'venue_1',
-  'sky_blue_image': 'venue_1',
-  'skyblue_image': 'venue_1',
-  'venue_1_image': 'venue_1',
-
-  'blue_water_banquet_hall_image': 'venue_2',
-  'blue_water_image': 'venue_2',
-  'bluewater_image': 'venue_2',
-  'venue_2_image': 'venue_2',
-
-  'thopate_banquets_image': 'venue_3',
-  'thopate_image': 'venue_3',
-  'venue_3_image': 'venue_3',
-
-  'ramkrishna_veg_banquet_image': 'venue_4',
-  'ramkrishna_image': 'venue_4',
-  'venue_4_image': 'venue_4',
-
-  'shree_krishna_palace_image': 'venue_5',
-  'shree_krishna_image': 'venue_5',
-  'venue_5_image': 'venue_5',
-
-  'raghunandan_ac_banquet_image': 'venue_6',
-  'raghunandan_image': 'venue_6',
-  'venue_6_image': 'venue_6',
-
-  'rangoli_banquet_hall_image': 'venue_7',
-  'rangoli_image': 'venue_7',
-  'venue_7_image': 'venue_7',
-
-  // Events → event_{type}
-  'shaadi_image': 'event_wedding',
-  'wedding_image': 'event_wedding',
-  'event_wedding_image': 'event_wedding',
-
-  'birthday_image': 'event_birthday',
-  'bday_image': 'event_birthday',
-  'event_birthday_image': 'event_birthday',
-
-  'engagement_image': 'event_engagement',
-  'event_engagement_image': 'event_engagement',
-
-  'sangeet_image': 'event_sangeet',
-  'event_sangeet_image': 'event_sangeet',
-
-  'haldi_image': 'event_haldi',
-  'event_haldi_image': 'event_haldi',
-
-  'mehendi_image': 'event_mehendi',
-  'event_mehendi_image': 'event_mehendi',
-
-  'anniversary_image': 'event_anniversary',
-  'event_anniversary_image': 'event_anniversary',
-
-  'corporate_image': 'event_corporate',
-  'event_corporate_image': 'event_corporate'
+  'sky_blue_banquet_hall_image': 'venue_1', 'sky_blue_image': 'venue_1', 'skyblue_image': 'venue_1', 'venue_1_image': 'venue_1',
+  'blue_water_banquet_hall_image': 'venue_2', 'blue_water_image': 'venue_2', 'bluewater_image': 'venue_2', 'venue_2_image': 'venue_2',
+  'thopate_banquets_image': 'venue_3', 'thopate_image': 'venue_3', 'venue_3_image': 'venue_3',
+  'ramkrishna_veg_banquet_image': 'venue_4', 'ramkrishna_image': 'venue_4', 'venue_4_image': 'venue_4',
+  'shree_krishna_palace_image': 'venue_5', 'shree_krishna_image': 'venue_5', 'venue_5_image': 'venue_5',
+  'raghunandan_ac_banquet_image': 'venue_6', 'raghunandan_image': 'venue_6', 'venue_6_image': 'venue_6',
+  'rangoli_banquet_hall_image': 'venue_7', 'rangoli_image': 'venue_7', 'venue_7_image': 'venue_7',
+  'shaadi_image': 'event_wedding', 'wedding_image': 'event_wedding', 'event_wedding_image': 'event_wedding',
+  'birthday_image': 'event_birthday', 'bday_image': 'event_birthday', 'event_birthday_image': 'event_birthday',
+  'engagement_image': 'event_engagement', 'event_engagement_image': 'event_engagement',
+  'sangeet_image': 'event_sangeet', 'event_sangeet_image': 'event_sangeet',
+  'haldi_image': 'event_haldi', 'event_haldi_image': 'event_haldi',
+  'mehendi_image': 'event_mehendi', 'event_mehendi_image': 'event_mehendi',
+  'anniversary_image': 'event_anniversary', 'event_anniversary_image': 'event_anniversary',
+  'corporate_image': 'event_corporate', 'event_corporate_image': 'event_corporate'
 };
 
-// Helper: fetch a single workflow_content URL by content_key
 async function getWorkflowUrl(contentKey) {
   try {
-    var res = await supabase.get(
-      '/rest/v1/workflow_content?content_key=eq.' +
-        encodeURIComponent(contentKey) +
-        '&is_active=eq.true&select=text_content'
-    );
-    if (res.data && res.data[0] && res.data[0].text_content) {
-      return res.data[0].text_content;
-    }
+    var res = await supabase.get('/rest/v1/workflow_content?content_key=eq.' + encodeURIComponent(contentKey) + '&is_active=eq.true&select=text_content');
+    if (res.data && res.data[0] && res.data[0].text_content) return res.data[0].text_content;
     return null;
-  } catch (e) {
-    console.error('getWorkflowUrl error:', e.message);
-    return null;
-  }
+  } catch (e) { console.error('getWorkflowUrl error:', e.message); return null; }
 }
 
-// NEW: return ALL media for a given AI key: up to 4 images + 2 videos
 async function getMediaBundle(key) {
   try {
     var normalizedKey = key.toLowerCase().replace(/[\s-]+/g, '_');
     var canonical = VENUE_KEY_MAP[normalizedKey] || normalizedKey;
-    console.log('Media lookup key:', key, '→ canonical:', canonical);
-
+    console.log('Media lookup:', key, '→', canonical);
     var images = [];
     var videos = [];
-
     var mEvent = canonical.match(/^event_([a-z0-9_]+)$/);
     var mVenue = canonical.match(/^venue_(\d+)$/);
-
     if (mEvent) {
-      var typeSlug = mEvent[1];
-
-      // event_{type}_image_1..4
-      var imgKeys = [];
-      for (var i = 1; i <= 4; i++) {
-        imgKeys.push('event_' + typeSlug + '_image_' + i);
-      }
-
-      // event_{type}_video_1..2
-      var vidKeys = [];
-      for (var j = 1; j <= 2; j++) {
-        vidKeys.push('event_' + typeSlug + '_video_' + j);
-      }
-
-      var imgPromises = imgKeys.map(function(k) { return getWorkflowUrl(k); });
-      var vidPromises = vidKeys.map(function(k) { return getWorkflowUrl(k); });
-
-      var imgResults = await Promise.all(imgPromises);
-      var vidResults = await Promise.all(vidPromises);
-
-      imgResults.forEach(function(url) { if (url) images.push(url); });
-      vidResults.forEach(function(url) { if (url) videos.push(url); });
-
+      var slug = mEvent[1];
+      var ip = []; for (var i = 1; i <= 4; i++) ip.push(getWorkflowUrl('event_' + slug + '_image_' + i));
+      var vp = []; for (var j = 1; j <= 2; j++) vp.push(getWorkflowUrl('event_' + slug + '_video_' + j));
+      (await Promise.all(ip)).forEach(function(u) { if (u) images.push(u); });
+      (await Promise.all(vp)).forEach(function(u) { if (u) videos.push(u); });
       return { images: images, videos: videos };
     }
-
     if (mVenue) {
       var idx = parseInt(mVenue[1], 10);
       if (!isNaN(idx)) {
-        var vImgKeys = [];
-        for (var ii = 1; ii <= 4; ii++) {
-          vImgKeys.push('venue_' + idx + '_image_' + ii);
-        }
-        var vVidKeys = [];
-        for (var jj = 1; jj <= 2; jj++) {
-          vVidKeys.push('venue_' + idx + '_video_' + jj);
-        }
-
-        var vImgPromises = vImgKeys.map(function(k) { return getWorkflowUrl(k); });
-        var vVidPromises = vVidKeys.map(function(k) { return getWorkflowUrl(k); });
-
-        var vImgResults = await Promise.all(vImgPromises);
-        var vVidResults = await Promise.all(vVidPromises);
-
-        vImgResults.forEach(function(url) { if (url) images.push(url); });
-        vVidResults.forEach(function(url) { if (url) videos.push(url); });
-
+        var vip = []; for (var ii = 1; ii <= 4; ii++) vip.push(getWorkflowUrl('venue_' + idx + '_image_' + ii));
+        var vvp = []; for (var jj = 1; jj <= 2; jj++) vvp.push(getWorkflowUrl('venue_' + idx + '_video_' + jj));
+        (await Promise.all(vip)).forEach(function(u) { if (u) images.push(u); });
+        (await Promise.all(vvp)).forEach(function(u) { if (u) videos.push(u); });
         return { images: images, videos: videos };
       }
     }
-
-    // Fallback: treat canonical as a single content_key (for backward compatibility)
-    var singleUrl = await getWorkflowUrl(canonical);
-    if (singleUrl) images.push(singleUrl);
-
+    var single = await getWorkflowUrl(canonical);
+    if (single) images.push(single);
     return { images: images, videos: videos };
-  } catch (e) {
-    console.error('getMediaBundle error:', e.message);
-    return { images: [], videos: [] };
-  }
+  } catch (e) { console.error('getMediaBundle error:', e.message); return { images: [], videos: [] }; }
+}
+
+// Contextual captions based on key name
+function getMediaCaption(key, index, isVideo) {
+  var k = (key || '').toLowerCase();
+  var pre = isVideo ? '🎥' : '📸';
+  if (index > 0) return ''; // only first item gets caption
+  if (k.includes('wedding') || k.includes('shaadi')) return pre + ' Hamare Wedding events — aisa banate hain hum! ✨';
+  if (k.includes('birthday') || k.includes('bday')) return pre + ' Birthday party — itna sundar karte hain hum! 🎂';
+  if (k.includes('engagement')) return pre + ' Engagement decoration — ekdum filmy feel! 💍';
+  if (k.includes('sangeet')) return pre + ' Sangeet night — full entertainment! 🎵';
+  if (k.includes('haldi')) return pre + ' Haldi decoration — rang-birangi aur traditional! 🌸';
+  if (k.includes('mehendi')) return pre + ' Mehendi setup — bohot khoobsurat! 🎨';
+  if (k.includes('anniversary')) return pre + ' Anniversary decoration — romantic aur special! 💝';
+  if (k.includes('corporate')) return pre + ' Corporate event — professional aur impactful! 🏢';
+  if (k.includes('venue_1') || k.includes('sky_blue')) return pre + ' Sky Blue Banquet Hall — hamare kaam ki jhalak ✨';
+  if (k.includes('venue_2') || k.includes('blue_water')) return pre + ' Blue Water Banquet Hall — hamare kaam ki jhalak ✨';
+  if (k.includes('venue_3') || k.includes('thopate')) return pre + ' Thopate Banquets — hamare kaam ki jhalak ✨';
+  if (k.includes('venue_4') || k.includes('ramkrishna')) return pre + ' RamKrishna Veg Banquet — hamare kaam ki jhalak ✨';
+  if (k.includes('venue_5') || k.includes('shree_krishna')) return pre + ' Shree Krishna Palace — hamare kaam ki jhalak ✨';
+  if (k.includes('venue_6') || k.includes('raghunandan')) return pre + ' Raghunandan AC Banquet — hamare kaam ki jhalak ✨';
+  if (k.includes('venue_7') || k.includes('rangoli')) return pre + ' Rangoli Banquet Hall — hamare kaam ki jhalak ✨';
+  return pre + ' Phoenix Events — hamare kaam ki jhalak ✨';
 }
 
 function buildKnowledgeContext(kb) {
@@ -321,7 +241,6 @@ function buildKnowledgeContext(kb) {
   }).join('\n\n');
 }
 
-// ── EXTRACT LEAD DATA FROM AI RESPONSE ──
 function extractLeadData(aiText) {
   var updates = {};
   var patterns = {
@@ -361,88 +280,86 @@ function cleanAiTags(text) {
   return text.replace(/\[LEAD:[^\]]+\]/g, '').replace(/\[SEND:[^\]]+\]/g, '').trim();
 }
 
+var OUR_VENUE_KEYWORDS = ['sky blue', 'blue water', 'thopate', 'ramkrishna', 'ram krishna', 'shree krishna', 'raghunandan', 'rangoli'];
+function isOurVenue(venueName) {
+  if (!venueName) return false;
+  var lower = String(venueName).toLowerCase();
+  return OUR_VENUE_KEYWORDS.some(function(k) { return lower.indexOf(k) !== -1; });
+}
 
-// ── CALL GROQ AI ──
 async function callGroq(phone, userMessage, lead, history, knowledgeBase) {
   var kb = buildKnowledgeContext(knowledgeBase);
-
-  // Build what we already know about this lead
   var alreadyKnow = [];
   var missing = [];
+  var venueIsOurs = false;
+
   if (lead) {
     var hasName = lead.name && lead.name !== 'Friend' && lead.name !== 'Guest' && lead.name !== 'Unknown';
     if (hasName) alreadyKnow.push('Naam: ' + lead.name); else missing.push('naam');
-    if (lead.event_type) alreadyKnow.push('Event: ' + lead.event_type); else missing.push('event type');
+    if (lead.event_type) alreadyKnow.push('Event type: ' + lead.event_type); else missing.push('event type');
     if (lead.event_date) alreadyKnow.push('Event date: ' + lead.event_date); else missing.push('event date');
     if (lead.guest_count) alreadyKnow.push('Guests: ' + lead.guest_count); else missing.push('guest count');
-    if (lead.venue) alreadyKnow.push('Venue: ' + lead.venue); else missing.push('venue preference');
-    if (lead.package_type) alreadyKnow.push('Package: ' + lead.package_type); else missing.push('package type');
-    if (lead.services_needed) alreadyKnow.push('Services: ' + lead.services_needed); else missing.push('services needed');
-    if (lead.city) alreadyKnow.push('City: ' + lead.city);
+    if (lead.venue) { alreadyKnow.push('Venue: ' + lead.venue); venueIsOurs = isOurVenue(lead.venue); } else missing.push('venue');
+
+    // Priority order: function_list → services_needed → indoor_outdoor → theme → city_area (only if not our venue) → package_type
+    if (lead.function_list) alreadyKnow.push('Associated functions: ' + lead.function_list); else missing.push('function_list — "Wedding ke saath aur kya hoga? Mehendi, haldi, sangeet, reception?"');
+    if (lead.services_needed) alreadyKnow.push('Services needed: ' + lead.services_needed); else missing.push('services_needed — "Kaun si services chahiye? Decoration, photography, videography, DJ, lighting, mandap?"');
+    if (lead.indoor_outdoor) alreadyKnow.push('Indoor/Outdoor: ' + lead.indoor_outdoor); else missing.push('indoor_outdoor — "Event indoor hoga ya outdoor?"');
+    if (lead.theme) alreadyKnow.push('Theme/colour: ' + lead.theme); else missing.push('theme — "Koi specific theme ya colour scheme hai?"');
+    if (!venueIsOurs) {
+      if (lead.city) alreadyKnow.push('City/Area: ' + lead.city);
+      else missing.push('city_area — "Aap kis area mein event karna chahte hain?" (SIRF isliye poocho kyunki venue hamare 7 partner venues mein se nahi hai)');
+    } else {
+      if (lead.city) alreadyKnow.push('City/Area: ' + lead.city);
+    }
+    if (lead.package_type) alreadyKnow.push('Package: ' + lead.package_type); else missing.push('package_type — "Budget ke hisaab se: simple, standard, premium ya luxury?"');
     if (lead.preferred_call_time) alreadyKnow.push('Preferred call time: ' + lead.preferred_call_time);
     if (lead.email) alreadyKnow.push('Email: ' + lead.email);
-    if (lead.callback_date) alreadyKnow.push('Callback scheduled: ' + lead.callback_date);
   }
 
-  // Voice call context — this is the magic for continuity
   var voiceContext = '';
   if (lead && lead.call_count > 0) {
     voiceContext = '\n\nVOICE CALL CONTEXT (BAHUT IMPORTANT):\n';
-    voiceContext += 'Is user se pehle ek voice call hua hai Aishwarya ke saath. ';
-    voiceContext += 'Ab user WhatsApp pe message kar raha/rahi hai — SAME Aishwarya ho tum, conversation continue ho rahi hai.\n';
-    if (lead.call_summary && lead.call_summary.trim()) {
-      voiceContext += 'Call ka summary: ' + lead.call_summary + '\n';
-    }
-    if (lead.last_voice_transcript && lead.last_voice_transcript.trim()) {
-      var shortTranscript = lead.last_voice_transcript.substring(0, 800);
-      voiceContext += 'Call transcript (partial): ' + shortTranscript + '\n';
-    }
-    voiceContext += '\nCall ka natural continuation karo:\n';
-    voiceContext += '- Call mein jo baat hui usका reference de — \"call pe jo baat hui thi\", \"jaise aapne bataya tha\"\n';
+    voiceContext += 'Is user se pehle ek voice call hua hai. Ab user WhatsApp pe message kar raha/rahi hai — SAME Aishwarya ho tum, conversation continue ho rahi hai.\n';
+    if (lead.call_summary && lead.call_summary.trim()) voiceContext += 'Call summary: ' + lead.call_summary + '\n';
+    if (lead.last_voice_transcript && lead.last_voice_transcript.trim()) voiceContext += 'Call transcript (partial): ' + lead.last_voice_transcript.substring(0, 800) + '\n';
+    voiceContext += '\nCall continuation rules:\n';
+    voiceContext += '- Call mein jo baat hui uska reference do naturally\n';
     voiceContext += '- Jo data call pe collect hua woh DOBARA mat maango\n';
-    voiceContext += '- Sirf jo baaki missing hai woh naturally poocho\n';
-    voiceContext += '- Feel aana chahiye ki same Aishwarya hai jo call pe thi\n';
+    voiceContext += '- Sirf jo missing hai woh naturally poocho\n';
   } else if (lead && lead.whatsapp_count > 0) {
     voiceContext = '\n\nRETURNING WA USER: Pehle WhatsApp pe baat ho chuki hai. Warmly continue karo.';
   }
 
+  var allCollected = missing.length === 0;
+
   var leadContext = lead
-    ? 'CUSTOMER KE BAARE MEIN JO PATA HAI:\n' + (alreadyKnow.length ? alreadyKnow.join('\n') : 'Kuch nahi pata abhi') +
-      '\n\nJO ABHI BAAKI HAI COLLECT KARNA:\n' + (missing.length ? missing.join(', ') : 'Sab data mil gaya!') +
-      '\n\nJO PEHLE SE PATA HAI WOH BILKUL MAT POOCHO — sirf missing fields collect karo ek-ek karke.' + voiceContext
-    : 'NAYA CUSTOMER — pehli baar baat ho rahi hai.\nSabhi major questions ek-ek karke poochne hain: naam, event, date, guests, venue, package, services.';
+    ? 'CUSTOMER KE BAARE MEIN JO PATA HAI:\n' +
+      (alreadyKnow.length ? alreadyKnow.join('\n') : 'Kuch nahi pata abhi') +
+      '\n\nJO MISSING HAI (PRIORITY ORDER MEIN — EK-EK KARKE COLLECT KARO):\n' +
+      (allCollected ? 'SAARA DATA MIL GAYA! Support mode mein raho — aur koi naya sawaal nahi.' : missing.map(function(m, i) { return (i + 1) + '. ' + m; }).join('\n')) +
+      '\n\nJO PEHLE SE PATA HAI WOH BILKUL MAT POOCHO.' + voiceContext
+    : 'NAYA CUSTOMER — pehli baar baat ho rahi hai. Priority mein collect karo: naam, event type, event date, guest count, venue, function_list, services_needed, indoor_outdoor, theme, package_type.';
 
-  var systemPrompt = 'Tu Aishwarya hai — Phoenix Events & Production ki WhatsApp assistant, Pimpri-Chinchwad, Pune se.\n\n' +
-
-    'HAMESHA SIRF HINDI MEIN BAAT KAR — chahe user kuch bhi bheje.\n' +
-    'Hindi Devanagari ya Hinglish (Hindi words, Roman script) use kar — lekin KABHI bhi English ya Marathi mein reply mat kar.\n' +
-    'Agar user English mein likhe, toh bhi Hindi mein jawab de — \"Bilkul! Main batati hoon...\" ki tarah.\n' +
-    'Agar user Marathi mein likhe, toh bhi Hindi mein jawab de — \"Haan zaroor...\" ki tarah.\n\n' +
-
+  var systemPrompt =
+    'Tu Aishwarya hai — Phoenix Events & Production ki WhatsApp assistant, Pimpri-Chinchwad, Pune se.\n\n' +
+    'LANGUAGE: HAMESHA SIRF HINDI MEIN BAAT KAR. Hinglish (Roman script) ya Devanagari dono theek hai. KABHI English ya Marathi mein reply mat kar.\n\n' +
     'PERSONALITY:\n' +
-    '- Fun, bubbly, warm — jaise ek helpful saheli jo genuinely events ke liye excited hoti hai\n' +
-    '- Real insaan ki tarah baat kar — kabhi robotic mat lag\n' +
-    '- Hamesha apne liye female words use kar: bataungi, karungi, hoon, rahi hoon — kabhi bataunga/karunga mat likhna\n' +
-    '- User ko \"aap\" se address kar\n' +
-    '- Choti natural reactions theek hain: \"Wah!\", \"Ooh nice!\", \"Acha!\" — par sirf jab genuinely fit ho\n\n' +
-
+    '- Warm, bubbly, genuine — jaise ek helpful saheli\n' +
+    '- Real insaan ki tarah — kabhi robotic mat lag\n' +
+    '- HAMESHA female words: bataungi, karungi, hoon, rahi hoon — KABHI bataunga/karunga nahi\n' +
+    '- User ko "aap" bolna\n' +
+    '- Natural reactions: "Wah!", "Acha!", "Bahut sahi!" — sirf jab genuinely fit ho\n\n' +
     'RESPONSE STYLE:\n' +
     '- 2-3 lines max — short, warm, conversational\n' +
-    '- Ek hi sawaal ek response mein\n' +
-    '- *bold* important cheezein — venue names, dates\n' +
-    '- Emojis natural jagah use kar\n' +
-    '- Paragraph mat likho — crisp rakho\n\n' +
-
+    '- EK HI SAWAAL ek response mein — KABHI do sawaal ek saath nahi\n' +
+    '- *bold* important cheezein, emojis natural jagah pe\n\n' +
     'CUSTOMER STATUS:\n' + leadContext + '\n\n' +
-
     'KNOWLEDGE BASE:\n' + kb + '\n\n' +
-
     'COMPANY INFO:\n' +
     'Phoenix Events & Production | Pimpri-Chinchwad, Pune\n' +
-    'Website: phoenixeventsandproduction.com\n' +
-    'Instagram: @phoenix_events_and_production\n' +
-    'Call: +91 80357 35856\n\n' +
-
+    'Founded 2017 by Kevin | 500+ events | 98% client satisfaction\n' +
+    'Website: phoenixeventsandproduction.com | Instagram: @phoenix_events_and_production | Call: +91 80357 35856\n\n' +
     'PARTNER VENUES (7):\n' +
     '1. Sky Blue Banquet Hall — Punawale/Ravet ⭐4.7 | 100-500 guests\n' +
     '2. Blue Water Banquet Hall — Punawale ⭐5.0 | 50-300 guests\n' +
@@ -451,56 +368,30 @@ async function callGroq(phone, userMessage, lead, history, knowledgeBase) {
     '5. Shree Krishna Palace — Pimpri Colony ⭐4.3 | 100-600 guests\n' +
     '6. Raghunandan AC Banquet — Tathawade ⭐4.0 | 100-350 guests\n' +
     '7. Rangoli Banquet Hall — Chinchwad ⭐4.3 | 100-500 guests\n\n' +
-
-    'CONVERSATION FLOW (jo already pata hai woh SKIP karo):\n' +
-    '1. Naam (agar nahi pata)\n' +
-    '2. Event type → turant related portfolio image bhejo\n' +
-    '3. Event date\n' +
-    '4. Guest count\n' +
-    '5. Venue (suggest hamare venues, images bhejo)\n' +
-    '6. Services — pehle options batao, phir poocho\n' +
-    '7. Package type (simple/standard/premium/luxury)\n' +
-    '8. Preferred callback time → specialist ke liye\n' +
-    '9. Summary + specialist CTA\n\n' +
-
-    'IMAGES — ZAROOR BHEJO (exact keys use karo):\n' +
-    'EVENT IMAGES — exact key:\n' +
-    '[SEND:image=event_wedding_image] — shaadi/wedding\n' +
-    '[SEND:image=event_birthday_image] — birthday\n' +
-    '[SEND:image=event_engagement_image] — engagement\n' +
-    '[SEND:image=event_sangeet_image] — sangeet\n' +
-    '[SEND:image=event_haldi_image] — haldi\n' +
-    '[SEND:image=event_mehendi_image] — mehendi\n' +
-    '[SEND:image=event_anniversary_image] — anniversary\n' +
-    '[SEND:image=event_corporate_image] — corporate\n' +
-    'VENUE IMAGES — exact key:\n' +
-    '[SEND:image=venue_1_image] — Sky Blue Banquet Hall\n' +
-    '[SEND:image=venue_2_image] — Blue Water Banquet Hall\n' +
-    '[SEND:image=venue_3_image] — Thopate Banquets\n' +
-    '[SEND:image=venue_4_image] — RamKrishna Veg Banquet\n' +
-    '[SEND:image=venue_5_image] — Shree Krishna Palace\n' +
-    '[SEND:image=venue_6_image] — Raghunandan AC Banquet\n' +
-    '[SEND:image=venue_7_image] — Rangoli Banquet Hall\n' +
-    'KABHI BHI apni taraf se key mat banao — sirf yahi exact keys use karo\n' +
-    'Jab bhi event ya venue discuss ho → relevant image bhejo\n\n' +
-
+    'DATA COLLECTION RULES:\n' +
+    '- Jo pehle se pata hai WOH DOBARA MAT POOCHO — kabhi nahi\n' +
+    '- EK RESPONSE MEIN SIRF EK SAWAAL\n' +
+    '- Missing fields priority order mein collect karo (list mein jo pehle hai woh pehle poocho)\n' +
+    '- Sawaal naturally weave karo — form ki tarah nahi\n' +
+    '- User kuch aur pooche → pehle uska jawab do, PHIR ek missing sawaal naturally poocho\n' +
+    '- city_area SIRF tab poocho jab venue hamare 7 partner venues mein se nahi hai\n' +
+    '- Jab sare fields collect ho jaayein → sirf support mode, koi naya sawaal nahi\n\n' +
+    'SUMMARY RULE: KABHI apne aap summary mat bhejo. SIRF tab bhejo jab user specifically maange.\n\n' +
+    'SPECIALIST RULE: KABHI "main call karungi" mat bolna. HAMESHA "hamare specialist call karenge" bolna.\n\n' +
+    'IMAGES BHEJO (exact keys):\n' +
+    'Events: [SEND:image=event_wedding_image], [SEND:image=event_birthday_image], [SEND:image=event_engagement_image],\n' +
+    '[SEND:image=event_sangeet_image], [SEND:image=event_haldi_image], [SEND:image=event_mehendi_image],\n' +
+    '[SEND:image=event_anniversary_image], [SEND:image=event_corporate_image]\n' +
+    'Venues: [SEND:image=venue_1_image] through [SEND:image=venue_7_image]\n' +
+    'User photos/videos maange → turant bhejo. Event change ho → us event ki images bhejo. KABHI apni key mat banao.\n\n' +
     'STRICT RULES:\n' +
-    '- Sirf Phoenix Events related topics pe baat karo\n' +
-    '- Off-topic: \"Main sirf Phoenix Events ke baare mein help kar sakti hoon 😊\"\n' +
-    '- Price kabhi mat batao — \"Exact pricing ke liye hamare specialist se baat karein\"\n' +
-    '- Disrespect: ek baar warn karo, dobara ho toh conversation khatam karo\n\n' +
-
-    'CALLBACK SCHEDULING:\n' +
-    '\"Kya main specialist ka callback schedule kar doon? Woh jald hi call karenge!\n' +
-    'Kaunsa time suit karega — morning, afternoon ya evening?\"\n' +
-    '[LEAD:status=callback_scheduled] [LEAD:call_time=evening]\n\n' +
-
-    'DATA COLLECTION TAGS (message ke BILKUL END mein — user ko nahi dikhte):\n' +
-    '[LEAD:name=Rahul] [LEAD:event_type=Wedding] [LEAD:venue=Sky Blue Banquet Hall]\n' +
-    '[LEAD:guest_count=200] [LEAD:event_date=15/06/2026] [LEAD:package_type=premium]\n' +
-    '[LEAD:services=decoration,photography] [LEAD:theme=Royal] [LEAD:indoor_outdoor=indoor]\n' +
-    '[LEAD:email=rahul@gmail.com] [LEAD:city=Pimpri-Chinchwad]\n' +
-    '[LEAD:functions=mehendi,sangeet] [LEAD:relationship=self] [LEAD:call_time=evening]\n' +
+    '- Sirf Phoenix Events topics\n' +
+    '- Price kabhi nahi — "Exact pricing ke liye hamare specialist se baat karein"\n' +
+    '- Disrespect: ek baar warn, dobara ho toh khatam\n\n' +
+    'DATA TAGS (message ke END mein):\n' +
+    '[LEAD:name=] [LEAD:event_type=] [LEAD:venue=] [LEAD:guest_count=] [LEAD:event_date=]\n' +
+    '[LEAD:package_type=] [LEAD:services=] [LEAD:theme=] [LEAD:indoor_outdoor=]\n' +
+    '[LEAD:email=] [LEAD:city=] [LEAD:functions=] [LEAD:relationship=] [LEAD:call_time=]\n' +
     '[LEAD:status=qualified] [LEAD:score+5]';
 
   var messages = [];
@@ -511,7 +402,7 @@ async function callGroq(phone, userMessage, lead, history, knowledgeBase) {
 
   try {
     var response = await axios.post('https://api.groq.com/openai/v1/chat/completions',
-      { model: 'llama-3.3-70b-versatile', max_tokens: 300, temperature: 0.5, messages: [{ role: 'system', content: systemPrompt }].concat(messages) },
+      { model: 'llama-3.3-70b-versatile', max_tokens: 350, temperature: 0.5, messages: [{ role: 'system', content: systemPrompt }].concat(messages) },
       { headers: { 'Authorization': 'Bearer ' + GROQ_KEY, 'Content-Type': 'application/json' } }
     );
     var fullText = response.data.choices[0].message.content;
@@ -523,7 +414,6 @@ async function callGroq(phone, userMessage, lead, history, knowledgeBase) {
   }
 }
 
-// ── MAIN MESSAGE HANDLER ──
 async function handleMessage(phone, userMessage, name, msgId) {
   console.log('Message from:', phone, '| text:', userMessage.substring(0, 60));
   await logInbound(phone, userMessage, msgId);
@@ -541,27 +431,23 @@ async function handleMessage(phone, userMessage, name, msgId) {
   var cleanResponse = cleanAiTags(aiResponse);
   await sendText(phone, cleanResponse);
 
-  // NEW: send ALL media for each requested key (4 images + 2 videos where available)
+  // Send all media bundles with contextual captions
   for (var i = 0; i < imagesToSend.length; i++) {
     try {
       var bundle = await getMediaBundle(imagesToSend[i]);
-      // images
       for (var ii = 0; ii < bundle.images.length; ii++) {
         await sleep(600);
-        await sendImage(phone, bundle.images[ii], '✨ Phoenix Events');
+        await sendImage(phone, bundle.images[ii], getMediaCaption(imagesToSend[i], ii, false));
       }
-      // videos
       for (var jj = 0; jj < bundle.videos.length; jj++) {
         await sleep(800);
-        await sendVideo(phone, bundle.videos[jj], '🎥 Phoenix Events video');
+        await sendVideo(phone, bundle.videos[jj], getMediaCaption(imagesToSend[i], jj, true));
       }
-    } catch (e) {}
+    } catch (e) { console.error('media send error:', e.message); }
   }
 
-  // Map venue field
   if (extracted.venue) { extracted.venue_name = extracted.venue; delete extracted.venue; }
 
-  // Update urgency
   if (extracted.event_date) {
     try {
       var parts = extracted.event_date.split('/');
@@ -573,14 +459,11 @@ async function handleMessage(phone, userMessage, name, msgId) {
   }
 
   if (Object.keys(extracted).length > 0) {
-    // Remove fields that don't exist in leads table schema
     var safeExtracted = Object.assign({}, extracted);
-    delete safeExtracted.venue_name; // handled separately above
-    // Only keep known valid fields
-    var validFields = ['name','event_type','event_date','guest_count','venue','status',
-      'package_type','services_needed','theme','indoor_outdoor','email','city',
-      'source','function_list','relationship_to_event','preferred_call_time',
-      'instagram_id','urgency_level','callback_date','callback_time','associate_name'];
+    delete safeExtracted.venue_name;
+    var validFields = ['name','event_type','event_date','guest_count','venue','status','package_type',
+      'services_needed','theme','indoor_outdoor','email','city','source','function_list',
+      'relationship_to_event','preferred_call_time','instagram_id','urgency_level','callback_date','callback_time'];
     var filteredExtracted = {};
     Object.keys(safeExtracted).forEach(function(k) {
       if (validFields.indexOf(k) !== -1) filteredExtracted[k] = safeExtracted[k];
@@ -592,7 +475,6 @@ async function handleMessage(phone, userMessage, name, msgId) {
   if (scoreIncrement) await incrementLeadScore(phone, scoreIncrement);
 }
 
-// ── WEBHOOK ROUTES ──
 app.get('/whatsapp', function(req, res) {
   var mode = req.query['hub.mode'];
   var token = req.query['hub.verify_token'];
@@ -630,8 +512,8 @@ app.post('/whatsapp', async function(req, res) {
 });
 
 app.get('/', function(req, res) {
-  res.json({ status: 'Phoenix WhatsApp AI Agent VERSION 5', timestamp: new Date().toISOString() });
+  res.json({ status: 'Phoenix WhatsApp AI Agent VERSION 6', timestamp: new Date().toISOString() });
 });
 
 var PORT = process.env.PORT || 3000;
-app.listen(PORT, function() { console.log('Phoenix WhatsApp AI Agent VERSION 5 running on port ' + PORT); });
+app.listen(PORT, function() { console.log('Phoenix WhatsApp AI Agent VERSION 6 running on port ' + PORT); });
