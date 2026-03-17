@@ -42,7 +42,6 @@ function validDate(val) {
 }
 
 function parseDuration(body) {
-  // Bolna sends duration as conversation_duration (confirmed from logs)
   var d = body.conversation_duration || body.call_duration || body.duration ||
     body.call_length || body.duration_seconds ||
     (body.metadata && body.metadata.call_duration) ||
@@ -66,6 +65,19 @@ function parseGuestCount(val) {
   return isNaN(n) ? null : n;
 }
 
+// Safely converts any value to string — prevents [object Object]
+function safeStr(val) {
+  if (!val) return '';
+  if (typeof val === 'object') {
+    if (Array.isArray(val)) return val.join(', ');
+    var j = JSON.stringify(val);
+    return j === '{}' ? '' : j;
+  }
+  var s = String(val).trim();
+  if (s === '{}' || s === 'null' || s === 'undefined' || s === 'NULL') return '';
+  return s;
+}
+
 var VENUES = [
   { index: 1, name: 'Sky Blue Banquet Hall', area: 'Punawale/Ravet', rating: '4.7', capacity: '100-500', features: 'AC, Parking, Stage, Catering' },
   { index: 2, name: 'Blue Water Banquet Hall', area: 'Punawale', rating: '5.0', capacity: '50-300', features: 'Premium AC, Parking' },
@@ -76,11 +88,13 @@ var VENUES = [
   { index: 7, name: 'Rangoli Banquet Hall', area: 'Chinchwad', rating: '4.3', capacity: '100-500', features: 'AC, Parking, Decoration Support' }
 ];
 
+// Returns venue index (1-7) if venue name matches one of our partners, else null
 function getVenueIndex(venueName) {
   if (!venueName) return null;
-  var lower = venueName.toLowerCase();
+  var lower = String(venueName).toLowerCase();
   for (var v = 0; v < VENUES.length; v++) {
-    if (lower.indexOf(VENUES[v].name.toLowerCase().split(' ')[0].toLowerCase()) !== -1) return VENUES[v].index;
+    var firstWord = VENUES[v].name.toLowerCase().split(' ')[0];
+    if (lower.indexOf(firstWord) !== -1) return VENUES[v].index;
   }
   return null;
 }
@@ -94,66 +108,43 @@ async function getLeadByPhone(phone) {
 
 async function getMediaByKey(key) {
   try {
-    // text_content holds the media URL directly — no join needed
     var res = await supabase.get('/rest/v1/workflow_content?content_key=eq.' + key + '&is_active=eq.true&select=text_content');
     if (res.data && res.data[0] && res.data[0].text_content) return res.data[0].text_content;
     return null;
   } catch (e) { return null; }
 }
 
-// NEW: fetch all 4 images + 2 videos for a given event type
+// Fetch all 4 images + 2 videos for an event type
 async function getEventMedia(eventType) {
   if (!eventType) return { images: [], videos: [] };
-  var slug = eventType.toLowerCase().replace(/\s+/g, '_');
+  var slug = String(eventType).toLowerCase().replace(/\s+/g, '_');
   var images = [];
   var videos = [];
-
-  // image slots: event_{type}_image_1..4
   for (var i = 1; i <= 4; i++) {
     var img = await getMediaByKey('event_' + slug + '_image_' + i);
     if (img) images.push(img);
   }
-
-  // video slots: event_{type}_video_1..2
   for (var j = 1; j <= 2; j++) {
     var vid = await getMediaByKey('event_' + slug + '_video_' + j);
     if (vid) videos.push(vid);
   }
-
   return { images: images, videos: videos };
 }
 
-// NEW: fetch all 4 images + 2 videos for a given venue index 1–7
+// Fetch all 4 images + 2 videos for a venue by index 1-7
 async function getVenueMediaByIndex(idx) {
   if (!idx) return { images: [], videos: [] };
   var images = [];
   var videos = [];
-
-  // image slots: venue_{i}_image_1..4
   for (var i = 1; i <= 4; i++) {
     var img = await getMediaByKey('venue_' + idx + '_image_' + i);
     if (img) images.push(img);
   }
-
-  // video slots: venue_{i}_video_1..2
   for (var j = 1; j <= 2; j++) {
     var vid = await getMediaByKey('venue_' + idx + '_video_' + j);
     if (vid) videos.push(vid);
   }
-
   return { images: images, videos: videos };
-}
-
-// (old single-image helper kept for safety, but no longer used)
-async function getEventImage(eventType) {
-  if (!eventType) return null;
-  var url = await getMediaByKey('event_' + eventType.toLowerCase().replace(/\s+/g, '_') + '_image');
-  if (url) return url;
-  try {
-    var res = await supabase.get('/rest/v1/media_assets?subcategory=eq.' + eventType.toLowerCase() + '&is_active=eq.true&file_type=eq.image&select=public_url&order=sort_order.asc&limit=1');
-    if (res.data && res.data[0]) return res.data[0].public_url;
-  } catch (e) {}
-  return null;
 }
 
 async function saveVoiceCall(data) {
@@ -204,9 +195,9 @@ async function upsertLead(data) {
     if (data.event_date) payload.event_date = data.event_date;
     if (data.city) payload.city = data.city;
     if (data.area) payload.area = data.area;
-    if (data.services_needed) payload.services_needed = data.services_needed;
-    if (data.package_type) payload.package_type = data.package_type;
-    if (data.function_list) payload.function_list = data.function_list;
+    if (data.services_needed) payload.services_needed = safeStr(data.services_needed);
+    if (data.package_type) payload.package_type = safeStr(data.package_type);
+    if (data.function_list) payload.function_list = safeStr(data.function_list);
     if (data.relationship_to_event) payload.relationship_to_event = data.relationship_to_event;
     if (data.preferred_call_time) payload.preferred_call_time = data.preferred_call_time;
     if (data.preferred_call_date) payload.preferred_call_date = data.preferred_call_date;
@@ -217,7 +208,6 @@ async function upsertLead(data) {
     if (data.catering_needed !== undefined && data.catering_needed !== '') {
       payload.catering_needed = data.catering_needed === 'true' || data.catering_needed === true;
     }
-    // Save call summary and transcript so WA agent can continue the conversation naturally
     if (data._callSummary) payload.call_summary = data._callSummary;
     if (data._callTranscript) payload.last_voice_transcript = data._callTranscript.substring(0, 3000);
 
@@ -283,7 +273,6 @@ async function sendWhatsAppImage(phone, imageUrl, caption) {
   } catch (e) { console.error('sendWhatsAppImage:', JSON.stringify(e.response ? e.response.data : e.message)); }
 }
 
-// NEW: send WhatsApp video
 async function sendWhatsAppVideo(phone, videoUrl, caption) {
   try {
     if (!WA_TOKEN || !videoUrl) return;
@@ -299,45 +288,43 @@ async function sendWhatsAppVideo(phone, videoUrl, caption) {
 async function handleHandoffFlow(data) {
   console.log('Handoff WA flow for:', data.phone);
   var name = (data.name && data.name !== 'Guest' && data.name !== 'Unknown') ? data.name : '';
-  var ev = data.event_type || '';
-  var venue = data.venue_name || '';
-  var venueBooked = data.venue_booked === true || data.venue_booked === 'true';
+  var ev = data.event_type ? safeStr(data.event_type) : '';
+  var venue = data.venue_name ? safeStr(data.venue_name) : '';
+  var venueBooked = data.venue_booked === true || data.venue_booked === 'true' || data.venue_booked === 'True';
+  // Only treat as "our venue" if it actually matches one of 7 partners
+  var venueIdx = (venueBooked && venue) ? getVenueIndex(venue) : null;
+  var venueIsOurs = venueIdx !== null;
 
-  // 1. Warm greeting — reference the call, mention WA message + images/videos coming
+  // ── MESSAGE 1: Warm greeting ──
   var greeting = '';
-  if (name) greeting += '*' + name + '* ji! 😊\n\n';
-  greeting += 'Main Aishwarya hoon — Phoenix Events & Production se. Abhi aapse call pe baat hui!\n\n';
+  if (name) greeting += 'Hi *' + name + '* ji! 😊\n\n';
+  greeting += 'Main Aishwarya hoon — Phoenix Events & Production se.\n';
+  greeting += 'Abhi aapse call pe bahut acchi baat hui! 📞\n\n';
   if (ev) {
-    greeting += 'Aapke *' + ev + '* event ke liye hamare kuch khoobsurat kaam ki jhalak aur venue ki photos/videos abhi bhej rahi hoon WhatsApp pe! 📸✨\n\n';
+    greeting += 'Ye rahi hamare *' + ev + '* events ki kuch khoobsurat photos aur videos — thik se dekh lijiye! 📸✨\n\n';
   } else {
-    greeting += 'Phoenix Events ke kuch khoobsurat kaam ki photos aur videos abhi bhej rahi hoon! 📸✨\n\n';
+    greeting += 'Ye rahi Phoenix Events ke kuch khoobsurat photos aur videos — thik se dekh lijiye! 📸✨\n\n';
   }
-  greeting += 'Aur hamare specialist *jald hi* personally aapko call karenge — yeh hamaara vaada hai! 🙏';
+  greeting += 'Dekhne ke baad mujhe batayein — aapse kuch aur sawaal bhi karne hain! 😊';
   await sendWhatsApp(data.phone, greeting);
   await sleep(1500);
 
-  // 2. Event portfolio media — send all 4 images + 2 videos if available
+  // ── EVENT MEDIA: all 4 images + 2 videos ──
   if (ev) {
     var evMedia = await getEventMedia(ev);
-    if (evMedia.images.length || evMedia.videos.length) {
-      // Images
+    if (evMedia.images.length > 0 || evMedia.videos.length > 0) {
       for (var ei = 0; ei < evMedia.images.length; ei++) {
-        var captionImg = ei === 0
-          ? '🎊 Hamare ' + ev + ' events — aisa banate hain hum! ✨'
-          : '';
-        await sendWhatsAppImage(data.phone, evMedia.images[ei], captionImg);
+        var eImgCap = ei === 0 ? ('🎊 Hamare *' + ev + '* events — aisa banate hain hum! ✨') : '';
+        await sendWhatsAppImage(data.phone, evMedia.images[ei], eImgCap);
         await sleep(800);
       }
-      // Videos
-      for (var evv = 0; evv < evMedia.videos.length; evv++) {
-        var captionVid = evv === 0
-          ? '🎥 ' + ev + ' event ka short video preview'
-          : '';
-        await sendWhatsAppVideo(data.phone, evMedia.videos[evv], captionVid);
+      for (var evi = 0; evi < evMedia.videos.length; evi++) {
+        var eVidCap = evi === 0 ? ('🎥 ' + ev + ' event ka video preview') : '';
+        await sendWhatsAppVideo(data.phone, evMedia.videos[evi], eVidCap);
         await sleep(1000);
       }
     } else {
-      // No media uploaded yet — send text appreciation instead
+      // No media uploaded yet — send text description
       await sendWhatsApp(data.phone,
         '🎊 *' + ev + ' events* mein hum kya karte hain:\n' +
         '✨ Custom theme decoration\n' +
@@ -351,34 +338,36 @@ async function handleHandoffFlow(data) {
     }
   }
 
-  // 3. Venue section — logic based on whether venue is booked or not
-  if (venueBooked && venue) {
-    // Already booked a venue — send their venue media (4 images + 2 videos) + appreciation
-    var vi = getVenueIndex(venue);
-    if (vi) {
-      var vMedia = await getVenueMediaByIndex(vi);
-      for (var vii = 0; vii < vMedia.images.length; vii++) {
-        var vCaptionImg = vii === 0
-          ? '🏛️ ' + venue + ' — yahan hum kya kar sakte hain dekho! ✨'
-          : '';
-        await sendWhatsAppImage(data.phone, vMedia.images[vii], vCaptionImg);
-        await sleep(800);
-      }
-      for (var viv = 0; viv < vMedia.videos.length; viv++) {
-        var vCaptionVid = viv === 0
-          ? '🎥 ' + venue + ' setup ka short video preview'
-          : '';
-        await sendWhatsAppVideo(data.phone, vMedia.videos[viv], vCaptionVid);
-        await sleep(1000);
-      }
-    }
+  // ── VENUE MEDIA ──
+  if (venueIsOurs) {
+    // Booked one of our 7 partner venues — send that venue's 4 images + 2 videos
     await sendWhatsApp(data.phone,
-      '🏛️ *' + venue + '* — ek bohot accha choice hai! 👌\n\n' +
-      'Hamare specialist is venue ke saath kaam kar chuke hain — aapka event yahan bhi yaaadgaar banayenge! 😊'
+      'Aur ye rahi *' + venue + '* mein hamare kaam ki kuch photos aur videos — yahaan hum kya kar sakte hain dekho! 🏛️✨'
     );
-    await sleep(1000);
+    await sleep(800);
+
+    var vMedia = await getVenueMediaByIndex(venueIdx);
+    var venueSentCount = 0;
+    for (var vii = 0; vii < vMedia.images.length; vii++) {
+      var vImgCap = vii === 0 ? ('🏛️ ' + venue + ' — hamare kaam ki jhalak ✨') : '';
+      await sendWhatsAppImage(data.phone, vMedia.images[vii], vImgCap);
+      venueSentCount++;
+      await sleep(800);
+    }
+    for (var vivi = 0; vivi < vMedia.videos.length; vivi++) {
+      var vVidCap = vivi === 0 ? ('🎥 ' + venue + ' — setup ka video preview') : '';
+      await sendWhatsAppVideo(data.phone, vMedia.videos[vivi], vVidCap);
+      await sleep(1000);
+    }
+    if (venueSentCount === 0) {
+      await sendWhatsApp(data.phone,
+        '🏛️ *' + venue + '* — ekdum sahi choice hai! 👌\n\n' +
+        'Hamare specialist is venue ke saath kai baar kaam kar chuke hain — aapka event yahaan bhi yaadgaar banega! 😊'
+      );
+    }
+
   } else {
-    // Venue not booked — send full venue list + mention location-based suggestion
+    // Venue NOT booked or not one of ours — send list + preview of first 2 partner venues
     await sendWhatsApp(data.phone,
       '🏛️ *Hamare 7 Premium Partner Venues — Pimpri-Chinchwad, Pune:*\n\n' +
       '1️⃣ *Sky Blue Banquet Hall* ⭐ 4.7\n' +
@@ -395,54 +384,38 @@ async function handleHandoffFlow(data) {
       '📍 Tathawade | 100–350 guests\n\n' +
       '7️⃣ *Rangoli Banquet Hall* ⭐ 4.3\n' +
       '📍 Chinchwad | 100–500 guests\n\n' +
-      'Kisi bhi venue ki zyada jaankari ya photos chahiye? Bas naam batao! 😊'
+      'Ye rahi pehle do venues ke hamare kaam ki kuch jhalak — bas reference ke liye! 😊'
     );
     await sleep(1200);
 
-    // Send media for first 2 venues as preview (all available slots)
+    // Sky Blue (venue 1) — all images + videos
     var v1Media = await getVenueMediaByIndex(1);
     for (var i1 = 0; i1 < v1Media.images.length; i1++) {
-      var cap1 = i1 === 0 ? '✨ Sky Blue Banquet Hall — Punawale/Ravet ⭐ 4.7' : '';
-      await sendWhatsAppImage(data.phone, v1Media.images[i1], cap1);
-      await sleep(800);
+      await sendWhatsAppImage(data.phone, v1Media.images[i1], i1 === 0 ? '✨ Sky Blue Banquet Hall — Punawale/Ravet ⭐ 4.7' : '');
+      await sleep(700);
     }
     for (var j1 = 0; j1 < v1Media.videos.length; j1++) {
-      var cap1v = j1 === 0 ? '🎥 Sky Blue Banquet Hall ka video preview' : '';
-      await sendWhatsAppVideo(data.phone, v1Media.videos[j1], cap1v);
+      await sendWhatsAppVideo(data.phone, v1Media.videos[j1], j1 === 0 ? '🎥 Sky Blue Banquet Hall — video preview' : '');
       await sleep(1000);
     }
 
+    // Blue Water (venue 2) — all images + videos
     var v2Media = await getVenueMediaByIndex(2);
     for (var i2 = 0; i2 < v2Media.images.length; i2++) {
-      var cap2 = i2 === 0 ? '✨ Blue Water Banquet Hall — Punawale ⭐ 5.0' : '';
-      await sendWhatsAppImage(data.phone, v2Media.images[i2], cap2);
-      await sleep(800);
+      await sendWhatsAppImage(data.phone, v2Media.images[i2], i2 === 0 ? '✨ Blue Water Banquet Hall — Punawale ⭐ 5.0' : '');
+      await sleep(700);
     }
     for (var j2 = 0; j2 < v2Media.videos.length; j2++) {
-      var cap2v = j2 === 0 ? '🎥 Blue Water Banquet Hall ka video preview' : '';
-      await sendWhatsAppVideo(data.phone, v2Media.videos[j2], cap2v);
+      await sendWhatsAppVideo(data.phone, v2Media.videos[j2], j2 === 0 ? '🎥 Blue Water Banquet Hall — video preview' : '');
       await sleep(1000);
     }
   }
 
-  // 4. Details summary + specialist CTA + vaada
-  var d = '✅ *Call mein jo details save ki hain:*\n\n';
-  if (ev)                  d += '🎊 *Event:* ' + ev + '\n';
-  if (data.guest_count)    d += '👥 *Guests:* ' + data.guest_count + '\n';
-  if (data.event_date)     d += '📅 *Date:* ' + data.event_date + '\n';
-  if (venue)               d += '🏛️ *Venue:* ' + venue + '\n';
-  if (data.services_needed) d += '✨ *Services:* ' + data.services_needed + '\n';
-  if (data.package_type)   d += '📦 *Package:* ' + data.package_type.charAt(0).toUpperCase() + data.package_type.slice(1) + '\n';
-  if (data.preferred_call_time) d += '📞 *Callback time:* ' + data.preferred_call_time + '\n';
-  if (data.city)           d += '📍 *City/Area:* ' + data.city + '\n';
-  d += '\n';
-  d += 'Hamare specialist *jald hi* aapko personally call karenge — *yeh hamaara vaada hai!* 🙏\n\n';
-  d += 'Tab tak agar koi bhi sawaal ho, koi venue ki photo dekhni ho, ya koi bhi baat karni ho — bas yahan message karo! Main hamesha available hoon 😊\n\n';
-  d += '📞 *+91 80357 35856*\n';
-  d += '🌐 phoenixeventsandproduction.com\n';
-  d += '📸 @phoenix_events_and_production';
-
-  await sendWhatsApp(data.phone, d);
+  // ── FINAL CTA — No auto summary ──
+  var cta = 'Ye sab thik se dekh lo! 😊\n\n';
+  cta += 'Koi bhi sawaal ho — kisi venue ki aur photos chahiye, services ke baare mein jaanna ho, ya kuch bhi — bas yahan message karo!\n\n';
+  cta += 'Aur hamare *specialist jald hi personally aapko call karenge* ek customised proposal lekar — *यह हमारा वादा है!* 🙏';
+  await sendWhatsApp(data.phone, cta);
 
   try {
     await supabase.patch('/rest/v1/leads?phone=eq.' + cleanPhone(data.phone), { handoff_wa_sent: true, updated_at: new Date().toISOString() });
@@ -465,19 +438,17 @@ function extractFromTranscript(transcript) {
 }
 
 // ── ROUTES ──
-app.get('/', function(req, res) { res.json({ status: 'Phoenix Events Voice Agent VERSION 12', timestamp: new Date().toISOString() }); });
-app.get('/phoenix-bolna-agent', function(req, res) { res.json({ status: 'webhook active', version: 8 }); });
+app.get('/', function(req, res) { res.json({ status: 'Phoenix Events Voice Agent VERSION 13', timestamp: new Date().toISOString() }); });
+app.get('/phoenix-bolna-agent', function(req, res) { res.json({ status: 'webhook active', version: 13 }); });
 
 app.post('/phoenix-bolna-agent', async function(req, res) {
   console.log('\n=== BOLNA WEBHOOK ===');
   var body = req.body;
   if (typeof body === 'string') { try { body = JSON.parse(body); } catch (e) {} }
 
-  // Log full payload so we can see exactly what Bolna sends
   console.log('BODY KEYS:', body ? Object.keys(body) : 'empty');
   console.log('BODY PREVIEW:', JSON.stringify(body).substring(0, 600));
 
-  // Bolna wraps some events inside a "message" object
   var msg = (body && body.message) || {};
 
   var status = cleanVal(
@@ -487,9 +458,6 @@ app.post('/phoenix-bolna-agent', async function(req, res) {
     ''
   );
 
-  // userNumber = the CALLER's mobile number (not the Plivo/agent number)
-  // Bolna sends caller in: user_number, from, call.customer.number, message.call.customer.number
-  // body.to = the Plivo number (agent side) — NEVER use this
   var userNumber = cleanVal(
     (body && body.user_number) ||
     (body && body.from) ||
@@ -499,11 +467,7 @@ app.post('/phoenix-bolna-agent', async function(req, res) {
     (body && body.caller) ||
     ''
   );
-  // Extra safety: if userNumber looks like our Plivo number, ignore it
-  // Our Plivo number is +918035735856 / 918035735856
-  if (userNumber === '918035735856' || userNumber === '8035735856') {
-    userNumber = '';
-  }
+  if (userNumber === '918035735856' || userNumber === '8035735856') userNumber = '';
 
   var toolName = cleanVal(
     (body && body.name) ||
@@ -553,16 +517,25 @@ app.post('/phoenix-bolna-agent', async function(req, res) {
     var p2 = cleanPhone(userNumber || (args2 && args2.phone) || '');
     if (p2) {
       upsertLead({
-        phone: p2, name: cleanVal(args2 && args2.name), event_type: cleanVal(args2 && args2.event_type),
-        venue_booked: args2 && args2.venue_booked, venue_name: cleanVal(args2 && args2.venue_name),
+        phone: p2,
+        name: cleanVal(args2 && args2.name),
+        event_type: cleanVal(args2 && args2.event_type),
+        venue_booked: args2 && args2.venue_booked,
+        venue_name: cleanVal(args2 && args2.venue_name),
         guest_count: cleanVal(String((args2 && args2.guest_count) || '')),
         event_date: validDate(cleanVal(args2 && args2.event_date)),
-        city: cleanVal(args2 && args2.city), area: cleanVal(args2 && args2.area),
-        services_needed: cleanVal(args2 && args2.services_needed), package_type: cleanVal(args2 && args2.package_type),
-        function_list: cleanVal(args2 && args2.function_list), relationship_to_event: cleanVal(args2 && args2.relationship_to_event),
-        preferred_call_time: cleanVal(args2 && args2.preferred_call_time), preferred_call_date: cleanVal(args2 && args2.preferred_call_date),
-        language: cleanVal(args2 && args2.language), competitor_comparing: args2 && args2.competitor_comparing,
-        catering_needed: args2 && args2.catering_needed, duration_seconds: 0
+        city: cleanVal(args2 && args2.city),
+        area: cleanVal(args2 && args2.area),
+        services_needed: safeStr(args2 && args2.services_needed),
+        package_type: safeStr(args2 && args2.package_type),
+        function_list: safeStr(args2 && args2.function_list),
+        relationship_to_event: cleanVal(args2 && args2.relationship_to_event),
+        preferred_call_time: cleanVal(args2 && args2.preferred_call_time),
+        preferred_call_date: cleanVal(args2 && args2.preferred_call_date),
+        language: cleanVal(args2 && args2.language),
+        competitor_comparing: args2 && args2.competitor_comparing,
+        catering_needed: args2 && args2.catering_needed,
+        duration_seconds: 0
       }).catch(function(e) { console.error('mid-call save error:', e.message); });
     }
     return res.json({ result: 'Haan, save ho gaya. Aage baat karein.' });
@@ -574,11 +547,10 @@ app.post('/phoenix-bolna-agent', async function(req, res) {
     var dur = parseDuration(body);
     console.log('COMPLETED:', p3, dur + 's');
     var ext = extractFromTranscript(body.transcript || '');
-    // Bolna sends extractions in extracted_data or custom_extractions
     var ex = body.extracted_data || body.custom_extractions || body.extractions || body.agent_extraction || {};
     console.log('EXTRACTED DATA:', JSON.stringify(ex).substring(0, 300));
+
     if (typeof ex === 'object' && ex !== null) {
-      // Support both field name variants Bolna might use
       var n = cleanVal(ex.customer_name || ex.name || ex.caller_name || '');
       if (n) ext.name = n;
       var et = cleanVal(ex.event_type || ex.eventType || ex.occasion || '');
@@ -587,19 +559,20 @@ app.post('/phoenix-bolna-agent', async function(req, res) {
       if (vb !== undefined) ext.venue_booked = vb;
       var vn = cleanVal(ex.venue_name || ex.venueName || ex.venue || '');
       if (vn) ext.venue_name = vn;
-      var gc = ex.guest_count || ex.guestCount || ex.guests;
-      if (gc) ext.guest_count = cleanVal(String(gc));
+      var gc2 = ex.guest_count || ex.guestCount || ex.guests;
+      if (gc2) ext.guest_count = cleanVal(String(gc2));
       var ed = ex.event_date || ex.eventDate || ex.date;
-      if (ed) ext.event_date = validDate(cleanVal(ed));
-      var pt = cleanVal(ex.package_type || ex.packageType || ex.package || '');
+      if (ed) ext.event_date = validDate(cleanVal(String(ed)));
+      // safeStr handles object/array values properly
+      var pt = safeStr(ex.package_type || ex.packageType || ex.package || '');
       if (pt) ext.package_type = pt;
-      var sn = cleanVal(ex.services_needed || ex.services || ex.servicesNeeded || '');
+      var sn = safeStr(ex.services_needed || ex.services || ex.servicesNeeded || '');
       if (sn) ext.services_needed = sn;
       var pct = cleanVal(ex.preferred_call_time || ex.callbackTime || ex.callback_time || '');
       if (pct) ext.preferred_call_time = pct;
       var rel = cleanVal(ex.relationship_to_event || ex.relationship || '');
       if (rel) ext.relationship_to_event = rel;
-      var fl = cleanVal(ex.function_list || ex.functions || '');
+      var fl = safeStr(ex.function_list || ex.functions || '');
       if (fl) ext.function_list = fl;
       var lang = cleanVal(ex.language_spoken || ex.language || '');
       if (lang) ext.language = lang;
@@ -607,6 +580,7 @@ app.post('/phoenix-bolna-agent', async function(req, res) {
       if (ca) ext.city = ca;
       if (ex.competitor_comparing !== undefined) ext.competitor_comparing = ex.competitor_comparing;
     }
+
     var prev2 = await getLeadByPhone(p3);
     var final = {
       phone: p3,
@@ -616,21 +590,20 @@ app.post('/phoenix-bolna-agent', async function(req, res) {
       venue_name: cleanVal(ext.venue_name) || (prev2 && prev2.venue) || '',
       guest_count: cleanVal(ext.guest_count) || (prev2 && String(prev2.guest_count || '')) || '',
       event_date: validDate(ext.event_date) || (prev2 && prev2.event_date) || null,
-      package_type: cleanVal(ext.package_type) || (prev2 && prev2.package_type) || '',
-      services_needed: cleanVal(ext.services_needed) || (prev2 && prev2.services_needed) || '',
+      package_type: safeStr(ext.package_type) || safeStr(prev2 && prev2.package_type) || '',
+      services_needed: safeStr(ext.services_needed) || safeStr(prev2 && prev2.services_needed) || '',
       preferred_call_time: cleanVal(ext.preferred_call_time) || (prev2 && prev2.preferred_call_time) || '',
       relationship_to_event: cleanVal(ext.relationship_to_event) || '',
-      function_list: cleanVal(ext.function_list) || '',
+      function_list: safeStr(ext.function_list) || '',
       language: cleanVal(ext.language) || '',
       city: cleanVal(ext.city) || '',
       competitor_comparing: ext.competitor_comparing,
       duration_seconds: dur
     };
-    // Save transcript + summary to leads table so WA agent can read it
+
     var callSummary = cleanVal(body.summary || body.call_summary || '');
     var callTranscript = cleanVal(body.transcript || '');
     if (!callSummary && final.event_type) {
-      // Build a basic summary if Bolna didn't provide one
       callSummary = 'Voice call hua. Naam: ' + (final.name || 'unknown') + '. ';
       if (final.event_type) callSummary += 'Event: ' + final.event_type + '. ';
       if (final.guest_count) callSummary += 'Guests: ' + final.guest_count + '. ';
@@ -660,4 +633,4 @@ app.post('/phoenix-bolna-agent', async function(req, res) {
 });
 
 var PORT = process.env.PORT || 8080;
-app.listen(PORT, function() { console.log('Phoenix Events Voice Agent VERSION 12 running on port ' + PORT); });
+app.listen(PORT, function() { console.log('Phoenix Events Voice Agent VERSION 13 running on port ' + PORT); });
