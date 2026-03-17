@@ -66,6 +66,18 @@ async function sendImage(phone, imageUrl, caption) {
   } catch (e) { console.error('sendImage FAILED:', JSON.stringify(e.response ? e.response.data : e.message)); }
 }
 
+// NEW: send video via WhatsApp
+async function sendVideo(phone, videoUrl, caption) {
+  try {
+    if (!videoUrl) return;
+    var fp = phone.startsWith('+') ? phone : '+' + phone;
+    await axios.post('https://graph.facebook.com/v18.0/' + WA_PHONE_ID + '/messages',
+      { messaging_product: 'whatsapp', to: fp, type: 'video', video: { link: videoUrl, caption: caption || '' } },
+      { headers: { Authorization: 'Bearer ' + WA_TOKEN, 'Content-Type': 'application/json' } }
+    );
+  } catch (e) { console.error('sendVideo FAILED:', JSON.stringify(e.response ? e.response.data : e.message)); }
+}
+
 // ── SUPABASE ──
 async function getLead(phone) {
   try {
@@ -139,52 +151,162 @@ async function getKnowledgeBase() {
   } catch (e) { return []; }
 }
 
-// Map any venue name variation Groq might invent → correct content_key
+// Map Groq keys → canonical event/venue base keys
+// Canonical base keys are:
+//   event_{type}   (we will expand to event_{type}_image_1..4 & event_{type}_video_1..2)
+//   venue_{1-7}    (we will expand to venue_{i}_image_1..4 & venue_{i}_video_1..2)
 var VENUE_KEY_MAP = {
-  'sky_blue_banquet_hall_image': 'venue_1_image',
-  'sky_blue_image': 'venue_1_image',
-  'skyblue_image': 'venue_1_image',
-  'blue_water_banquet_hall_image': 'venue_2_image',
-  'blue_water_image': 'venue_2_image',
-  'bluewater_image': 'venue_2_image',
-  'thopate_banquets_image': 'venue_3_image',
-  'thopate_image': 'venue_3_image',
-  'ramkrishna_veg_banquet_image': 'venue_4_image',
-  'ramkrishna_image': 'venue_4_image',
-  'shree_krishna_palace_image': 'venue_5_image',
-  'shree_krishna_image': 'venue_5_image',
-  'raghunandan_ac_banquet_image': 'venue_6_image',
-  'raghunandan_image': 'venue_6_image',
-  'rangoli_banquet_hall_image': 'venue_7_image',
-  'rangoli_image': 'venue_7_image',
-  // event aliases
-  'shaadi_image': 'event_wedding_image',
-  'wedding_image': 'event_wedding_image',
-  'birthday_image': 'event_birthday_image',
-  'bday_image': 'event_birthday_image',
-  'engagement_image': 'event_engagement_image',
-  'sangeet_image': 'event_sangeet_image',
-  'haldi_image': 'event_haldi_image',
-  'mehendi_image': 'event_mehendi_image',
-  'anniversary_image': 'event_anniversary_image',
-  'corporate_image': 'event_corporate_image',
+  // Venues → venue_{index}
+  'sky_blue_banquet_hall_image': 'venue_1',
+  'sky_blue_image': 'venue_1',
+  'skyblue_image': 'venue_1',
+  'venue_1_image': 'venue_1',
+
+  'blue_water_banquet_hall_image': 'venue_2',
+  'blue_water_image': 'venue_2',
+  'bluewater_image': 'venue_2',
+  'venue_2_image': 'venue_2',
+
+  'thopate_banquets_image': 'venue_3',
+  'thopate_image': 'venue_3',
+  'venue_3_image': 'venue_3',
+
+  'ramkrishna_veg_banquet_image': 'venue_4',
+  'ramkrishna_image': 'venue_4',
+  'venue_4_image': 'venue_4',
+
+  'shree_krishna_palace_image': 'venue_5',
+  'shree_krishna_image': 'venue_5',
+  'venue_5_image': 'venue_5',
+
+  'raghunandan_ac_banquet_image': 'venue_6',
+  'raghunandan_image': 'venue_6',
+  'venue_6_image': 'venue_6',
+
+  'rangoli_banquet_hall_image': 'venue_7',
+  'rangoli_image': 'venue_7',
+  'venue_7_image': 'venue_7',
+
+  // Events → event_{type}
+  'shaadi_image': 'event_wedding',
+  'wedding_image': 'event_wedding',
+  'event_wedding_image': 'event_wedding',
+
+  'birthday_image': 'event_birthday',
+  'bday_image': 'event_birthday',
+  'event_birthday_image': 'event_birthday',
+
+  'engagement_image': 'event_engagement',
+  'event_engagement_image': 'event_engagement',
+
+  'sangeet_image': 'event_sangeet',
+  'event_sangeet_image': 'event_sangeet',
+
+  'haldi_image': 'event_haldi',
+  'event_haldi_image': 'event_haldi',
+
+  'mehendi_image': 'event_mehendi',
+  'event_mehendi_image': 'event_mehendi',
+
+  'anniversary_image': 'event_anniversary',
+  'event_anniversary_image': 'event_anniversary',
+
+  'corporate_image': 'event_corporate',
+  'event_corporate_image': 'event_corporate'
 };
 
-async function getMediaImage(key) {
+// Helper: fetch a single workflow_content URL by content_key
+async function getWorkflowUrl(contentKey) {
   try {
-    // Normalize key — lowercase, replace spaces/hyphens with underscores
-    var normalizedKey = key.toLowerCase().replace(/[\s-]+/g, '_');
-    // Check alias map first
-    var resolvedKey = VENUE_KEY_MAP[normalizedKey] || normalizedKey;
-    console.log('Image lookup: ' + key + ' → ' + resolvedKey);
-    // text_content holds the image URL directly — no join needed
-    var res = await supabase.get('/rest/v1/workflow_content?content_key=eq.' + resolvedKey + '&is_active=eq.true&select=text_content');
+    var res = await supabase.get(
+      '/rest/v1/workflow_content?content_key=eq.' +
+        encodeURIComponent(contentKey) +
+        '&is_active=eq.true&select=text_content'
+    );
     if (res.data && res.data[0] && res.data[0].text_content) {
-      console.log('Image URL found:', res.data[0].text_content.substring(0, 80));
       return res.data[0].text_content;
     }
     return null;
-  } catch (e) { console.error('getMediaImage error:', e.message); return null; }
+  } catch (e) {
+    console.error('getWorkflowUrl error:', e.message);
+    return null;
+  }
+}
+
+// NEW: return ALL media for a given AI key: up to 4 images + 2 videos
+async function getMediaBundle(key) {
+  try {
+    var normalizedKey = key.toLowerCase().replace(/[\s-]+/g, '_');
+    var canonical = VENUE_KEY_MAP[normalizedKey] || normalizedKey;
+    console.log('Media lookup key:', key, '→ canonical:', canonical);
+
+    var images = [];
+    var videos = [];
+
+    var mEvent = canonical.match(/^event_([a-z0-9_]+)$/);
+    var mVenue = canonical.match(/^venue_(\d+)$/);
+
+    if (mEvent) {
+      var typeSlug = mEvent[1];
+
+      // event_{type}_image_1..4
+      var imgKeys = [];
+      for (var i = 1; i <= 4; i++) {
+        imgKeys.push('event_' + typeSlug + '_image_' + i);
+      }
+
+      // event_{type}_video_1..2
+      var vidKeys = [];
+      for (var j = 1; j <= 2; j++) {
+        vidKeys.push('event_' + typeSlug + '_video_' + j);
+      }
+
+      var imgPromises = imgKeys.map(function(k) { return getWorkflowUrl(k); });
+      var vidPromises = vidKeys.map(function(k) { return getWorkflowUrl(k); });
+
+      var imgResults = await Promise.all(imgPromises);
+      var vidResults = await Promise.all(vidPromises);
+
+      imgResults.forEach(function(url) { if (url) images.push(url); });
+      vidResults.forEach(function(url) { if (url) videos.push(url); });
+
+      return { images: images, videos: videos };
+    }
+
+    if (mVenue) {
+      var idx = parseInt(mVenue[1], 10);
+      if (!isNaN(idx)) {
+        var vImgKeys = [];
+        for (var ii = 1; ii <= 4; ii++) {
+          vImgKeys.push('venue_' + idx + '_image_' + ii);
+        }
+        var vVidKeys = [];
+        for (var jj = 1; jj <= 2; jj++) {
+          vVidKeys.push('venue_' + idx + '_video_' + jj);
+        }
+
+        var vImgPromises = vImgKeys.map(function(k) { return getWorkflowUrl(k); });
+        var vVidPromises = vVidKeys.map(function(k) { return getWorkflowUrl(k); });
+
+        var vImgResults = await Promise.all(vImgPromises);
+        var vVidResults = await Promise.all(vVidPromises);
+
+        vImgResults.forEach(function(url) { if (url) images.push(url); });
+        vVidResults.forEach(function(url) { if (url) videos.push(url); });
+
+        return { images: images, videos: videos };
+      }
+    }
+
+    // Fallback: treat canonical as a single content_key (for backward compatibility)
+    var singleUrl = await getWorkflowUrl(canonical);
+    if (singleUrl) images.push(singleUrl);
+
+    return { images: images, videos: videos };
+  } catch (e) {
+    console.error('getMediaBundle error:', e.message);
+    return { images: [], videos: [] };
+  }
 }
 
 function buildKnowledgeContext(kb) {
@@ -276,7 +398,7 @@ async function callGroq(phone, userMessage, lead, history, knowledgeBase) {
       voiceContext += 'Call transcript (partial): ' + shortTranscript + '\n';
     }
     voiceContext += '\nCall ka natural continuation karo:\n';
-    voiceContext += '- Call mein jo baat hui usका reference de — "call pe jo baat hui thi", "jaise aapne bataya tha"\n';
+    voiceContext += '- Call mein jo baat hui usका reference de — \"call pe jo baat hui thi\", \"jaise aapne bataya tha\"\n';
     voiceContext += '- Jo data call pe collect hua woh DOBARA mat maango\n';
     voiceContext += '- Sirf jo baaki missing hai woh naturally poocho\n';
     voiceContext += '- Feel aana chahiye ki same Aishwarya hai jo call pe thi\n';
@@ -294,15 +416,15 @@ async function callGroq(phone, userMessage, lead, history, knowledgeBase) {
 
     'HAMESHA SIRF HINDI MEIN BAAT KAR — chahe user kuch bhi bheje.\n' +
     'Hindi Devanagari ya Hinglish (Hindi words, Roman script) use kar — lekin KABHI bhi English ya Marathi mein reply mat kar.\n' +
-    'Agar user English mein likhe, toh bhi Hindi mein jawab de — "Bilkul! Main batati hoon..." ki tarah.\n' +
-    'Agar user Marathi mein likhe, toh bhi Hindi mein jawab de — "Haan zaroor..." ki tarah.\n\n' +
+    'Agar user English mein likhe, toh bhi Hindi mein jawab de — \"Bilkul! Main batati hoon...\" ki tarah.\n' +
+    'Agar user Marathi mein likhe, toh bhi Hindi mein jawab de — \"Haan zaroor...\" ki tarah.\n\n' +
 
     'PERSONALITY:\n' +
     '- Fun, bubbly, warm — jaise ek helpful saheli jo genuinely events ke liye excited hoti hai\n' +
     '- Real insaan ki tarah baat kar — kabhi robotic mat lag\n' +
     '- Hamesha apne liye female words use kar: bataungi, karungi, hoon, rahi hoon — kabhi bataunga/karunga mat likhna\n' +
-    '- User ko "aap" se address kar\n' +
-    '- Choti natural reactions theek hain: "Wah!", "Ooh nice!", "Acha!" — par sirf jab genuinely fit ho\n\n' +
+    '- User ko \"aap\" se address kar\n' +
+    '- Choti natural reactions theek hain: \"Wah!\", \"Ooh nice!\", \"Acha!\" — par sirf jab genuinely fit ho\n\n' +
 
     'RESPONSE STYLE:\n' +
     '- 2-3 lines max — short, warm, conversational\n' +
@@ -364,13 +486,13 @@ async function callGroq(phone, userMessage, lead, history, knowledgeBase) {
 
     'STRICT RULES:\n' +
     '- Sirf Phoenix Events related topics pe baat karo\n' +
-    '- Off-topic: "Main sirf Phoenix Events ke baare mein help kar sakti hoon 😊"\n' +
-    '- Price kabhi mat batao — "Exact pricing ke liye hamare specialist se baat karein"\n' +
+    '- Off-topic: \"Main sirf Phoenix Events ke baare mein help kar sakti hoon 😊\"\n' +
+    '- Price kabhi mat batao — \"Exact pricing ke liye hamare specialist se baat karein\"\n' +
     '- Disrespect: ek baar warn karo, dobara ho toh conversation khatam karo\n\n' +
 
     'CALLBACK SCHEDULING:\n' +
-    '"Kya main specialist ka callback schedule kar doon? Woh jald hi call karenge!\n' +
-    'Kaunsa time suit karega — morning, afternoon ya evening?"\n' +
+    '\"Kya main specialist ka callback schedule kar doon? Woh jald hi call karenge!\n' +
+    'Kaunsa time suit karega — morning, afternoon ya evening?\"\n' +
     '[LEAD:status=callback_scheduled] [LEAD:call_time=evening]\n\n' +
 
     'DATA COLLECTION TAGS (message ke BILKUL END mein — user ko nahi dikhte):\n' +
@@ -419,11 +541,20 @@ async function handleMessage(phone, userMessage, name, msgId) {
   var cleanResponse = cleanAiTags(aiResponse);
   await sendText(phone, cleanResponse);
 
-  // Send images
+  // NEW: send ALL media for each requested key (4 images + 2 videos where available)
   for (var i = 0; i < imagesToSend.length; i++) {
     try {
-      var imgUrl = await getMediaImage(imagesToSend[i]);
-      if (imgUrl) { await sleep(600); await sendImage(phone, imgUrl, '✨ Phoenix Events'); }
+      var bundle = await getMediaBundle(imagesToSend[i]);
+      // images
+      for (var ii = 0; ii < bundle.images.length; ii++) {
+        await sleep(600);
+        await sendImage(phone, bundle.images[ii], '✨ Phoenix Events');
+      }
+      // videos
+      for (var jj = 0; jj < bundle.videos.length; jj++) {
+        await sleep(800);
+        await sendVideo(phone, bundle.videos[jj], '🎥 Phoenix Events video');
+      }
     } catch (e) {}
   }
 
