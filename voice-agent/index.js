@@ -94,11 +94,9 @@ async function getLeadByPhone(phone) {
 
 async function getMediaByKey(key) {
   try {
-    var res = await supabase.get('/rest/v1/workflow_content?content_key=eq.' + key + '&is_active=eq.true&select=text_content,media_assets(public_url)');
-    if (res.data && res.data[0]) {
-      if (res.data[0].media_assets && res.data[0].media_assets.public_url) return res.data[0].media_assets.public_url;
-      if (res.data[0].text_content) return res.data[0].text_content;
-    }
+    // text_content holds the image URL directly — no join needed
+    var res = await supabase.get('/rest/v1/workflow_content?content_key=eq.' + key + '&is_active=eq.true&select=text_content');
+    if (res.data && res.data[0] && res.data[0].text_content) return res.data[0].text_content;
     return null;
   } catch (e) { return null; }
 }
@@ -368,7 +366,7 @@ function extractFromTranscript(transcript) {
 }
 
 // ── ROUTES ──
-app.get('/', function(req, res) { res.json({ status: 'Phoenix Events Voice Agent VERSION 11', timestamp: new Date().toISOString() }); });
+app.get('/', function(req, res) { res.json({ status: 'Phoenix Events Voice Agent VERSION 12', timestamp: new Date().toISOString() }); });
 app.get('/phoenix-bolna-agent', function(req, res) { res.json({ status: 'webhook active', version: 8 }); });
 
 app.post('/phoenix-bolna-agent', async function(req, res) {
@@ -563,4 +561,4 @@ app.post('/phoenix-bolna-agent', async function(req, res) {
 });
 
 var PORT = process.env.PORT || 8080;
-app.listen(PORT, function() { console.log('Phoenix Events Voice Agent VERSION 11 running on port ' + PORT); });
+app.listen(PORT, function() { console.log('Phoenix Events Voice Agent VERSION 12 running on port ' + PORT); });
