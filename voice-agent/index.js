@@ -326,13 +326,14 @@ async function handleHandoffFlow(data) {
     } else {
       // No media uploaded yet — send text description
       await sendWhatsApp(data.phone,
-        '🎊 *' + ev + ' events* mein hum kya karte hain:\n' +
+        '🎊 *' + ev + ' events* — hum kya karte hain:\n\n' +
         '✨ Custom theme decoration\n' +
         '📸 Professional photography & videography\n' +
-        '🎵 DJ & sound systems\n' +
-        '💡 Stage & lighting setup\n' +
-        '🌸 Full floral decoration\n\n' +
-        'Aur bhi bohot kuch — sab aapke sapnon ke hisaab se! 😊'
+        '🎵 DJ & amazing sound setup\n' +
+        '💡 Stage & lighting design\n' +
+        '🌸 Full floral & decor work\n\n' +
+        'Sab kuch aapke sapnon ke hisaab se — ekdum personalized! 😊\n' +
+        'Portfolio photos jald upload ho rahe hain — tab aur clearly dikhaayenge!'
       );
       await sleep(1000);
     }
@@ -362,7 +363,8 @@ async function handleHandoffFlow(data) {
     if (venueSentCount === 0) {
       await sendWhatsApp(data.phone,
         '🏛️ *' + venue + '* — ekdum sahi choice hai! 👌\n\n' +
-        'Hamare specialist is venue ke saath kai baar kaam kar chuke hain — aapka event yahaan bhi yaadgaar banega! 😊'
+        'Hum yahan kai baar kaam kar chuke hain — team ke saath coordination bhi ekdum smooth hai.\n' +
+        'Aapka event yahaan bhi yaadgaar banega, yeh pakka! 😊'
       );
     }
 
@@ -411,11 +413,21 @@ async function handleHandoffFlow(data) {
     }
   }
 
-  // ── FINAL CTA — No auto summary ──
+  // ── FINAL CTA + First question to kickstart WA conversation ──
   var cta = 'Ye sab thik se dekh lo! 😊\n\n';
-  cta += 'Koi bhi sawaal ho — kisi venue ki aur photos chahiye, services ke baare mein jaanna ho, ya kuch bhi — bas yahan message karo!\n\n';
-  cta += 'Aur hamare *specialist jald hi personally aapko call karenge* ek customised proposal lekar — *यह हमारा वादा है!* 🙏';
+  cta += 'Hamare *specialist jald hi personally aapko call karenge* ek customised proposal lekar — *यह हमारा वादा है!* 🙏\n\n';
+  cta += 'Aur koi bhi sawaal ho — venue ki photos chahiye, services ke baare mein jaanna ho, ya kuch bhi — bas yahan reply karo! Main yahan hoon 😊';
   await sendWhatsApp(data.phone, cta);
+  await sleep(1200);
+
+  // Send first missing question to kickstart the WA conversation naturally
+  var firstQ = '';
+  if (ev) {
+    firstQ = 'Waise, *' + ev + '* ke saath aur koi functions bhi plan hain? Jaise mehendi, haldi, sangeet, reception — ya sirf yeh ek event? 🎊';
+  } else {
+    firstQ = 'Waise, kaunsa khaas occasion plan ho raha hai? 😊';
+  }
+  await sendWhatsApp(data.phone, firstQ);
 
   try {
     await supabase.patch('/rest/v1/leads?phone=eq.' + cleanPhone(data.phone), { handoff_wa_sent: true, updated_at: new Date().toISOString() });
@@ -438,8 +450,8 @@ function extractFromTranscript(transcript) {
 }
 
 // ── ROUTES ──
-app.get('/', function(req, res) { res.json({ status: 'Phoenix Events Voice Agent VERSION 13', timestamp: new Date().toISOString() }); });
-app.get('/phoenix-bolna-agent', function(req, res) { res.json({ status: 'webhook active', version: 13 }); });
+app.get('/', function(req, res) { res.json({ status: 'Phoenix Events Voice Agent VERSION 14', timestamp: new Date().toISOString() }); });
+app.get('/phoenix-bolna-agent', function(req, res) { res.json({ status: 'webhook active', version: 14 }); });
 
 app.post('/phoenix-bolna-agent', async function(req, res) {
   console.log('\n=== BOLNA WEBHOOK ===');
@@ -633,4 +645,4 @@ app.post('/phoenix-bolna-agent', async function(req, res) {
 });
 
 var PORT = process.env.PORT || 8080;
-app.listen(PORT, function() { console.log('Phoenix Events Voice Agent VERSION 13 running on port ' + PORT); });
+app.listen(PORT, function() { console.log('Phoenix Events Voice Agent VERSION 14 running on port ' + PORT); });
