@@ -491,14 +491,15 @@ async function askGroq(userMessage, name) {
       'https://api.groq.com/openai/v1/chat/completions',
 
       {
-        model: 'llama3-70b-8192',
+        model: 'llama-3.3-70b-versatile',
 
         messages: [
           {
             role: 'system',
             content:
-              'You are Phoenix Events and Production WhatsApp AI assistant. Be friendly, short, professional and helpful.'
+              'You are Phoenix Events and Production WhatsApp AI assistant. Reply professionally, naturally, short and helpful. Help users regarding event planning, bookings, packages, services and inquiries.'
           },
+
           {
             role: 'user',
             content:
@@ -521,13 +522,17 @@ async function askGroq(userMessage, name) {
       }
     );
 
-    return (
+    if (
       response.data &&
       response.data.choices &&
       response.data.choices[0] &&
-      response.data.choices[0].message &&
-      response.data.choices[0].message.content
-    ) || 'Hello! How can we help you today?';
+      response.data.choices[0].message
+    ) {
+
+      return response.data.choices[0].message.content;
+    }
+
+    return 'Hello! How can we help you today?';
 
   } catch (e) {
 
@@ -554,6 +559,8 @@ async function handleMessage(
 ) {
 
   try {
+
+    console.log('⚡ handleMessage START');
 
     await logInbound(
       phone,
@@ -589,6 +596,10 @@ async function handleMessage(
       aiReply
     );
 
+    console.log(
+      '✅ Reply sent successfully'
+    );
+
   } catch (e) {
 
     console.error(
@@ -603,7 +614,6 @@ async function handleMessage(
 
   }
 }
-
 /* =========================================================
    PRIVACY POLICY
 ========================================================= */
