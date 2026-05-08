@@ -480,6 +480,131 @@ async function logOutbound(phone, message) {
 }
 
 /* =========================================================
+   AI MESSAGE HANDLER
+========================================================= */
+
+async function askGroq(userMessage, name) {
+
+  try {
+
+    const response = await axios.post(
+      'https://api.groq.com/openai/v1/chat/completions',
+
+      {
+        model: 'llama3-70b-8192',
+
+        messages: [
+          {
+            role: 'system',
+            content:
+              'You are Phoenix Events and Production WhatsApp AI assistant. Be friendly, short, professional and helpful.'
+          },
+          {
+            role: 'user',
+            content:
+              'Customer Name: ' +
+              name +
+              '\nMessage: ' +
+              userMessage
+          }
+        ],
+
+        temperature: 0.7,
+        max_tokens: 300
+      },
+
+      {
+        headers: {
+          Authorization: 'Bearer ' + GROQ_KEY,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    return (
+      response.data &&
+      response.data.choices &&
+      response.data.choices[0] &&
+      response.data.choices[0].message &&
+      response.data.choices[0].message.content
+    ) || 'Hello! How can we help you today?';
+
+  } catch (e) {
+
+    console.error(
+      'Groq Error:',
+      JSON.stringify(
+        e.response
+          ? e.response.data
+          : e.message,
+        null,
+        2
+      )
+    );
+
+    return 'Sorry, we are facing some technical issue right now.';
+  }
+}
+
+async function handleMessage(
+  phone,
+  messageText,
+  name,
+  msgId
+) {
+
+  try {
+
+    await logInbound(
+      phone,
+      messageText,
+      msgId
+    );
+
+    await upsertLead(
+      phone,
+      name,
+      {
+        last_message: messageText
+      }
+    );
+
+    await incrementLeadScore(
+      phone,
+      1
+    );
+
+    const aiReply = await askGroq(
+      messageText,
+      name
+    );
+
+    console.log(
+      '🤖 AI Reply:',
+      aiReply
+    );
+
+    await sendText(
+      phone,
+      aiReply
+    );
+
+  } catch (e) {
+
+    console.error(
+      'handleMessage FAILED:',
+      e.message
+    );
+
+    await sendText(
+      phone,
+      'Sorry, something went wrong. Please try again later.'
+    );
+
+  }
+}
+
+/* =========================================================
    PRIVACY POLICY
 ========================================================= */
 
