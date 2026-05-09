@@ -493,6 +493,56 @@ app.post('/website-lead', async function(req, res) {
   } catch (e) { console.error('website-lead error:', e.message); }
 });
 
+// ── SCHEDULE FOLLOWUP ──
+app.post('/schedule-followup', async function(req, res) {
+  try {
+    var data = req.body;
+    var phone = data.phone;
+    var message = data.message;
+    var sendNow = data.send_now || false;
+    if (!phone || !message) return res.json({ error: 'phone and message required' });
+    phone = String(phone).replace(/\D/g, '');
+    if (phone.length === 10) phone = '91' + phone;
+    if (sendNow) {
+      await sendText(phone, message);
+      console.log('Followup sent immediately to:', phone);
+      return res.json({ status: 'sent' });
+    }
+    // Store in wp_followups for scheduled send
+    var scheduledAt = data.scheduled_at || new Date(Date.now() + 3600000).toISOString();
+    var lead = await getLead(phone);
+    await supabase.post('/rest/v1/wp_followups', {
+      lead_id: lead ? lead.id : null,
+      lead_phone: phone,
+      scheduled_at: scheduledAt,
+      message: message,
+      status: 'pending'
+    });
+    console.log('Followup scheduled for:', phone, 'at', scheduledAt);
+    return res.json({ status: 'scheduled', scheduled_at: scheduledAt });
+  } catch (e) { console.error('schedule-followup error:', e.message); res.json({ error: e.message }); }
+});
+
+// ── PROCESS PENDING FOLLOWUPS (called by cron or manually) ──
+app.post('/process-followups', async function(req, res) {
+  try {
+    res.json({ status: 'processing' });
+    var now = new Date().toISOString();
+    var result = await supabase.get('/rest/v1/wp_followups?status=eq.pending&scheduled_at=lte.' + now + '&select=*&limit=50');
+    if (!result.data || result.data.length === 0) { console.log('No pending followups'); return; }
+    console.log('Processing', result.data.length, 'followups');
+    for (var i = 0; i < result.data.length; i++) {
+      var f = result.data[i];
+      try {
+        await sendText(f.lead_phone, f.message);
+        await supabase.patch('/rest/v1/wp_followups?id=eq.' + f.id, { status: 'sent' });
+        console.log('Followup sent to:', f.lead_phone);
+        await sleep(1000);
+      } catch (e) { console.error('Followup failed for:', f.lead_phone, e.message); }
+    }
+  } catch (e) { console.error('process-followups error:', e.message); }
+});
+
 // ── ROUTES ──
 app.get('/whatsapp', function(req, res) {
   var mode = req.query['hub.mode'], token = req.query['hub.verify_token'], challenge = req.query['hub.challenge'];
@@ -524,7 +574,7 @@ app.post('/whatsapp', async function(req, res) {
   } catch (e) { console.error('Webhook error:', e.message); }
 });
 
-app.get('/', function(req, res) { res.json({ status: 'Phoenix WhatsApp AI Agent VERSION 10', timestamp: new Date().toISOString() }); });
+app.get('/', function(req, res) { res.json({ status: 'Phoenix WhatsApp AI Agent VERSION 11', timestamp: new Date().toISOString() }); });
 
 app.get('/health', function(req, res) { res.status(200).json({ success: true, service: 'running', timestamp: new Date().toISOString() }); });
 
@@ -535,7 +585,7 @@ app.get('/privacy-policy', function(req, res) {
 var PORT = process.env.PORT || 3000;
 var server = app.listen(PORT, '0.0.0.0', function() {
   console.log('================================');
-  console.log('Phoenix WhatsApp AI Agent VERSION 10');
+  console.log('Phoenix WhatsApp AI Agent VERSION 11');
   console.log('Port: ' + PORT);
   console.log('================================');
 });
