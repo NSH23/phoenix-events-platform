@@ -925,7 +925,7 @@ async function claimFollowupRow(id) {
   try {
     var r = await supabase.patch(
       '/rest/v1/wp_followups?id=eq.' + id + '&status=eq.pending',
-      { status: 'processing', updated_at: new Date().toISOString() },
+      { status: 'processing' },
       { headers: { Prefer: 'return=representation' } }
     );
     return r.data && r.data.length > 0;
@@ -936,18 +936,19 @@ async function claimFollowupRow(id) {
 }
 
 async function finalizeFollowupRow(id, status, meta, deliveryError) {
-  var patch = {
-    status: status,
-    updated_at: new Date().toISOString(),
-    metadata: Object.assign({}, meta || {}, {
-      delivered_at: status === 'sent' || status === 'partial' ? new Date().toISOString() : undefined,
-      delivery_error: deliveryError || undefined
-    })
-  };
+  var metaPatch = Object.assign({}, meta || {});
+  if (status === 'sent' || status === 'partial') metaPatch.delivered_at = new Date().toISOString();
+  if (deliveryError) metaPatch.delivery_error = deliveryError;
+  var patch = { status: status, metadata: metaPatch };
   try {
     await supabase.patch('/rest/v1/wp_followups?id=eq.' + id, patch);
   } catch (e) {
     console.error('finalizeFollowupRow failed:', id, status, waErrorDetail(e));
+    try {
+      await supabase.patch('/rest/v1/wp_followups?id=eq.' + id, { status: status });
+    } catch (e2) {
+      console.error('finalizeFollowupRow status-only failed:', id, waErrorDetail(e2));
+    }
   }
 }
 
@@ -1007,10 +1008,17 @@ async function runPendingFollowups() {
   try {
     await supabase.patch(
       '/rest/v1/wp_followups?status=eq.processing&updated_at=lt.' + encodeURIComponent(staleBefore),
-      { status: 'pending', updated_at: new Date().toISOString() }
+      { status: 'pending' }
     );
   } catch (e) {
-    console.error('stale followup reset failed:', waErrorDetail(e));
+    try {
+      await supabase.patch(
+        '/rest/v1/wp_followups?status=eq.processing&created_at=lt.' + encodeURIComponent(staleBefore),
+        { status: 'pending' }
+      );
+    } catch (e2) {
+      console.error('stale followup reset failed:', waErrorDetail(e2));
+    }
   }
   var result = await supabase.get(
     '/rest/v1/wp_followups?status=eq.pending&scheduled_at=lte.' + encodeURIComponent(now) +
