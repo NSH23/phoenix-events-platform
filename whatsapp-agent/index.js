@@ -181,14 +181,35 @@ function waErrorDetail(e) {
   return (e && e.message) ? e.message : String(e);
 }
 
-/** Cloudinary raw PDFs need fl_attachment so WhatsApp can download the file. */
+/** Best Cloudinary delivery URL for WhatsApp document messages (raw PDFs). */
 function whatsappDocumentUrl(docUrl) {
-  if (!docUrl) return docUrl;
-  if (docUrl.indexOf('res.cloudinary.com') === -1) return docUrl;
-  if (docUrl.indexOf('/raw/upload/') !== -1 && docUrl.indexOf('fl_attachment') === -1) {
-    return docUrl.replace('/upload/', '/upload/fl_attachment/');
+  var list = whatsappDocumentUrlCandidates(docUrl);
+  return list.length ? list[0] : docUrl;
+}
+
+/** Try in order — WhatsApp/Meta is picky about raw URLs without a .pdf suffix. */
+function whatsappDocumentUrlCandidates(docUrl) {
+  if (!docUrl) return [];
+  if (docUrl.indexOf('res.cloudinary.com') === -1) return [docUrl];
+
+  var base = docUrl.split('?')[0];
+  var qs = docUrl.indexOf('?') >= 0 ? docUrl.substring(docUrl.indexOf('?')) : '';
+  var out = [];
+
+  if (!/\.pdf$/i.test(base)) out.push(base + '.pdf' + qs);
+
+  if (base.indexOf('/raw/upload/') !== -1 && base.indexOf('fl_attachment') === -1) {
+    var withFlag = base.replace('/upload/', '/upload/fl_attachment/');
+    out.push(/\.pdf$/i.test(withFlag) ? withFlag + qs : withFlag + '.pdf' + qs);
   }
-  return docUrl;
+
+  out.push(docUrl);
+  var seen = {};
+  return out.filter(function(u) {
+    if (seen[u]) return false;
+    seen[u] = true;
+    return true;
+  });
 }
 
 function sanitizeWaFilename(name) {
@@ -232,23 +253,61 @@ async function sendVideo(phone, videoUrl, caption, logMeta, strict) {
   }
 }
 
+async function sendDocumentLinkFallback(phone, link, filename, caption, logMeta) {
+  var fn = sanitizeWaFilename(filename);
+  var note = caption && String(caption).trim() ? String(caption).trim() + '\n\n' : '';
+  var msg = note + '📎 ' + fn + '\n' + link;
+  await sendText(phone, msg, logMeta);
+}
+
 async function sendDocument(phone, docUrl, filename, caption, logMeta, strict) {
+  if (!docUrl) return;
+  var fp = phone.startsWith('+') ? phone : '+' + phone;
+  var fname = sanitizeWaFilename(filename);
+  var candidates = whatsappDocumentUrlCandidates(docUrl);
+  if (!candidates.length) candidates = [docUrl];
+
+  var lastErr = null;
+  var deliveredLink = null;
+
+  for (var i = 0; i < candidates.length; i++) {
+    var link = candidates[i];
+    try {
+      console.log('Sending document try', (i + 1) + '/' + candidates.length, 'to', phone, ':', link.substring(0, 120));
+      var res = await axios.post('https://graph.facebook.com/v18.0/' + WA_PHONE_ID + '/messages',
+        { messaging_product: 'whatsapp', to: fp, type: 'document', document: { link: link, filename: fname } },
+        { headers: { Authorization: 'Bearer ' + WA_TOKEN, 'Content-Type': 'application/json' } }
+      );
+      deliveredLink = link;
+      var waId = res.data && res.data.messages && res.data.messages[0] && res.data.messages[0].id;
+      console.log('Document sent OK to', phone, waId ? ('id=' + waId) : '');
+      break;
+    } catch (e) {
+      lastErr = e;
+      console.error('sendDocument try', (i + 1), 'FAILED:', waErrorDetail(e));
+    }
+  }
+
+  if (!deliveredLink) {
+    console.error('sendDocument FAILED all URLs for', phone);
+    try {
+      await sendDocumentLinkFallback(phone, whatsappDocumentUrl(docUrl), filename, caption, logMeta);
+    } catch (e2) {
+      console.error('sendDocument link fallback FAILED:', waErrorDetail(e2));
+    }
+    if (strict) throw lastErr || new Error('document send failed');
+    return;
+  }
+
+  var label = caption && caption.trim() ? caption.trim() : (filename ? 'Document: ' + filename : 'Document sent');
+  await logOutbound(phone, label, 'document', Object.assign({ media_url: deliveredLink, filename: filename || null }, logMeta || {}));
+
+  // Meta often returns 200 but PDF does not appear on device — always send a tappable link too.
   try {
-    if (!docUrl) return;
-    var fp = phone.startsWith('+') ? phone : '+' + phone;
-    var link = whatsappDocumentUrl(docUrl);
-    var docPayload = { link: link, filename: sanitizeWaFilename(filename) };
-    console.log('Sending document to', phone, ':', link.substring(0, 100));
-    await axios.post('https://graph.facebook.com/v18.0/' + WA_PHONE_ID + '/messages',
-      { messaging_product: 'whatsapp', to: fp, type: 'document', document: docPayload },
-      { headers: { Authorization: 'Bearer ' + WA_TOKEN, 'Content-Type': 'application/json' } }
-    );
-    console.log('Document sent OK to', phone);
-    var label = caption && caption.trim() ? caption.trim() : (filename ? 'Document: ' + filename : 'Document sent');
-    await logOutbound(phone, label, 'document', Object.assign({ media_url: link, filename: filename || null }, logMeta || {}));
-  } catch (e) {
-    console.error('sendDocument FAILED:', waErrorDetail(e));
-    if (strict) throw e;
+    await sleep(500);
+    await sendDocumentLinkFallback(phone, deliveredLink, filename, '', logMeta);
+  } catch (e3) {
+    console.error('sendDocument link follow-up FAILED:', waErrorDetail(e3));
   }
 }
 
