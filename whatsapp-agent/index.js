@@ -176,7 +176,28 @@ async function sendText(phone, message, logMeta) {
   } catch (e) { console.error('sendText FAILED:', JSON.stringify(e.response ? e.response.data : e.message)); throw e; }
 }
 
-async function sendImage(phone, imageUrl, caption, logMeta) {
+function waErrorDetail(e) {
+  if (e && e.response && e.response.data) return JSON.stringify(e.response.data);
+  return (e && e.message) ? e.message : String(e);
+}
+
+/** Cloudinary raw PDFs need fl_attachment so WhatsApp can download the file. */
+function whatsappDocumentUrl(docUrl) {
+  if (!docUrl) return docUrl;
+  if (docUrl.indexOf('res.cloudinary.com') === -1) return docUrl;
+  if (docUrl.indexOf('/raw/upload/') !== -1 && docUrl.indexOf('fl_attachment') === -1) {
+    return docUrl.replace('/upload/', '/upload/fl_attachment/');
+  }
+  return docUrl;
+}
+
+function sanitizeWaFilename(name) {
+  var base = String(name || 'document').replace(/[^\w.\-]+/g, '_');
+  if (!/\.\w{2,5}$/i.test(base)) base += '.pdf';
+  return base.substring(0, 120);
+}
+
+async function sendImage(phone, imageUrl, caption, logMeta, strict) {
   try {
     if (!imageUrl) { console.log('sendImage: no imageUrl, skipping'); return; }
     var fp = phone.startsWith('+') ? phone : '+' + phone;
@@ -188,10 +209,13 @@ async function sendImage(phone, imageUrl, caption, logMeta) {
     console.log('Image sent OK to', phone);
     var label = caption && caption.trim() ? caption.trim() : 'Photo sent';
     await logOutbound(phone, label, 'image', Object.assign({ media_url: imageUrl }, logMeta || {}));
-  } catch (e) { console.error('sendImage FAILED:', JSON.stringify(e.response ? e.response.data : e.message)); }
+  } catch (e) {
+    console.error('sendImage FAILED:', waErrorDetail(e));
+    if (strict) throw e;
+  }
 }
 
-async function sendVideo(phone, videoUrl, caption, logMeta) {
+async function sendVideo(phone, videoUrl, caption, logMeta, strict) {
   try {
     if (!videoUrl) return;
     var fp = phone.startsWith('+') ? phone : '+' + phone;
@@ -202,24 +226,30 @@ async function sendVideo(phone, videoUrl, caption, logMeta) {
     console.log('Video sent OK to', phone);
     var label = caption && caption.trim() ? caption.trim() : 'Video sent';
     await logOutbound(phone, label, 'video', Object.assign({ media_url: videoUrl }, logMeta || {}));
-  } catch (e) { console.error('sendVideo FAILED:', JSON.stringify(e.response ? e.response.data : e.message)); }
+  } catch (e) {
+    console.error('sendVideo FAILED:', waErrorDetail(e));
+    if (strict) throw e;
+  }
 }
 
-async function sendDocument(phone, docUrl, filename, caption, logMeta) {
+async function sendDocument(phone, docUrl, filename, caption, logMeta, strict) {
   try {
     if (!docUrl) return;
     var fp = phone.startsWith('+') ? phone : '+' + phone;
-    var docPayload = { link: docUrl };
-    if (filename) docPayload.filename = filename;
-    if (caption) docPayload.caption = caption;
+    var link = whatsappDocumentUrl(docUrl);
+    var docPayload = { link: link, filename: sanitizeWaFilename(filename) };
+    console.log('Sending document to', phone, ':', link.substring(0, 100));
     await axios.post('https://graph.facebook.com/v18.0/' + WA_PHONE_ID + '/messages',
       { messaging_product: 'whatsapp', to: fp, type: 'document', document: docPayload },
       { headers: { Authorization: 'Bearer ' + WA_TOKEN, 'Content-Type': 'application/json' } }
     );
     console.log('Document sent OK to', phone);
     var label = caption && caption.trim() ? caption.trim() : (filename ? 'Document: ' + filename : 'Document sent');
-    await logOutbound(phone, label, 'document', Object.assign({ media_url: docUrl, filename: filename || null }, logMeta || {}));
-  } catch (e) { console.error('sendDocument FAILED:', JSON.stringify(e.response ? e.response.data : e.message)); }
+    await logOutbound(phone, label, 'document', Object.assign({ media_url: link, filename: filename || null }, logMeta || {}));
+  } catch (e) {
+    console.error('sendDocument FAILED:', waErrorDetail(e));
+    if (strict) throw e;
+  }
 }
 
 async function sendYoutubeLink(phone, youtubeId, caption) {
@@ -859,7 +889,7 @@ app.post('/admin-send-media', requireAdmin, async function(req, res) {
     } else if (mediaType === 'video') {
       await sendVideo(phone, url, caption, logMeta);
     } else if (mediaType === 'document') {
-      await sendDocument(phone, url, filename, caption, logMeta);
+      await sendDocument(phone, whatsappDocumentUrl(url), filename, caption, logMeta);
     } else {
       return res.status(400).json({ error: 'media_type must be text, image, video, or document' });
     }
@@ -883,32 +913,105 @@ function buildFollowupMediaMeta(data) {
   };
 }
 
-async function deliverFollowupPayload(phone, message, metadata, logSource) {
+function parseFollowupMeta(metadata) {
+  if (!metadata) return {};
+  if (typeof metadata === 'string') {
+    try { return JSON.parse(metadata); } catch (e) { return {}; }
+  }
+  return metadata;
+}
+
+async function claimFollowupRow(id) {
+  try {
+    var r = await supabase.patch(
+      '/rest/v1/wp_followups?id=eq.' + id + '&status=eq.pending',
+      { status: 'processing', updated_at: new Date().toISOString() },
+      { headers: { Prefer: 'return=representation' } }
+    );
+    return r.data && r.data.length > 0;
+  } catch (e) {
+    console.error('claimFollowupRow failed:', id, waErrorDetail(e));
+    return false;
+  }
+}
+
+async function finalizeFollowupRow(id, status, meta, deliveryError) {
+  var patch = {
+    status: status,
+    updated_at: new Date().toISOString(),
+    metadata: Object.assign({}, meta || {}, {
+      delivered_at: status === 'sent' || status === 'partial' ? new Date().toISOString() : undefined,
+      delivery_error: deliveryError || undefined
+    })
+  };
+  try {
+    await supabase.patch('/rest/v1/wp_followups?id=eq.' + id, patch);
+  } catch (e) {
+    console.error('finalizeFollowupRow failed:', id, status, waErrorDetail(e));
+  }
+}
+
+async function deliverFollowupParts(phone, message, metadata, logSource) {
   phone = normalizePhone(phone);
-  var logMeta = { source: logSource || 'admin' };
-  var meta = metadata && typeof metadata === 'object' ? metadata : {};
+  var logMeta = { source: logSource || 'admin', followup: true };
+  var meta = parseFollowupMeta(metadata);
+  var out = { textOk: false, mediaOk: false, errors: [] };
   var hasText = message && String(message).trim();
   var hasMedia = meta.media_url && meta.media_type;
 
-  if (!hasText && !hasMedia) throw new Error('nothing to send');
+  if (!hasText && !hasMedia) {
+    out.errors.push('nothing to send');
+    return out;
+  }
 
   if (hasText) {
-    await sendText(phone, String(message).trim(), logMeta);
-    await sleep(800);
+    try {
+      await sendText(phone, String(message).trim(), logMeta);
+      out.textOk = true;
+      await sleep(800);
+    } catch (e) {
+      out.errors.push('text: ' + waErrorDetail(e));
+    }
+  } else {
+    out.textOk = true;
   }
+
   if (hasMedia) {
-    var mt = String(meta.media_type).toLowerCase();
-    var cap = meta.caption || '';
-    if (mt === 'image') await sendImage(phone, meta.media_url, cap, logMeta);
-    else if (mt === 'video') await sendVideo(phone, meta.media_url, cap, logMeta);
-    else if (mt === 'document') await sendDocument(phone, meta.media_url, meta.filename || '', cap, logMeta);
-    else throw new Error('unsupported media_type: ' + mt);
-    await sleep(800);
+    try {
+      var mt = String(meta.media_type).toLowerCase();
+      var cap = meta.caption || '';
+      if (mt === 'image') await sendImage(phone, meta.media_url, cap, logMeta, true);
+      else if (mt === 'video') await sendVideo(phone, meta.media_url, cap, logMeta, true);
+      else if (mt === 'document') await sendDocument(phone, meta.media_url, meta.filename || '', cap, logMeta, true);
+      else throw new Error('unsupported media_type: ' + mt);
+      out.mediaOk = true;
+      await sleep(800);
+    } catch (e) {
+      out.errors.push('media: ' + waErrorDetail(e));
+    }
+  } else {
+    out.mediaOk = true;
   }
+
+  return out;
+}
+
+async function deliverFollowupPayload(phone, message, metadata, logSource) {
+  var out = await deliverFollowupParts(phone, message, metadata, logSource);
+  if (out.errors.length) throw new Error(out.errors.join('; '));
 }
 
 async function runPendingFollowups() {
   var now = new Date().toISOString();
+  var staleBefore = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  try {
+    await supabase.patch(
+      '/rest/v1/wp_followups?status=eq.processing&updated_at=lt.' + encodeURIComponent(staleBefore),
+      { status: 'pending', updated_at: new Date().toISOString() }
+    );
+  } catch (e) {
+    console.error('stale followup reset failed:', waErrorDetail(e));
+  }
   var result = await supabase.get(
     '/rest/v1/wp_followups?status=eq.pending&scheduled_at=lte.' + encodeURIComponent(now) +
     '&select=*&limit=50&order=scheduled_at.asc'
@@ -917,21 +1020,28 @@ async function runPendingFollowups() {
   var sent = 0;
   for (var i = 0; i < result.data.length; i++) {
     var f = result.data[i];
-    try {
-      await deliverFollowupPayload(f.lead_phone, f.message, f.metadata || {}, 'admin');
-      await supabase.patch('/rest/v1/wp_followups?id=eq.' + f.id, {
-        status: 'sent',
-        updated_at: new Date().toISOString()
-      });
+    var claimed = await claimFollowupRow(f.id);
+    if (!claimed) continue;
+
+    var meta = parseFollowupMeta(f.metadata);
+    var needsText = f.message && String(f.message).trim();
+    var needsMedia = meta.media_url && meta.media_type;
+    var out = await deliverFollowupParts(f.lead_phone, f.message, meta, 'admin');
+    var textOk = !needsText || out.textOk;
+    var mediaOk = !needsMedia || out.mediaOk;
+    var errMsg = out.errors.join('; ');
+
+    if (textOk && mediaOk) {
+      await finalizeFollowupRow(f.id, 'sent', meta, null);
       sent++;
-      await sleep(1000);
-    } catch (e) {
-      console.error('Followup failed:', f.lead_phone, f.id, e.message);
-      await supabase.patch('/rest/v1/wp_followups?id=eq.' + f.id, {
-        status: 'failed',
-        updated_at: new Date().toISOString()
-      });
+    } else if (textOk && needsMedia && !mediaOk) {
+      console.error('Followup partial (media failed):', f.lead_phone, f.id, errMsg);
+      await finalizeFollowupRow(f.id, 'partial', meta, errMsg);
+    } else {
+      console.error('Followup failed:', f.lead_phone, f.id, errMsg);
+      await finalizeFollowupRow(f.id, 'failed', meta, errMsg);
     }
+    await sleep(1000);
   }
   console.log('Processed followups:', sent, '/', result.data.length);
   return { processed: sent, total: result.data.length };
@@ -1022,7 +1132,7 @@ app.get('/privacy-policy', function(req, res) {
 });
 
 var PORT = process.env.PORT || 3000;
-var WP_FOLLOWUP_POLL_MS = parseInt(process.env.WP_FOLLOWUP_POLL_MS || '60000', 10);
+var WP_FOLLOWUP_POLL_MS = parseInt(process.env.WP_FOLLOWUP_POLL_MS || '15000', 10);
 var followupPollBusy = false;
 
 var server = app.listen(PORT, '0.0.0.0', function() {
@@ -1036,13 +1146,13 @@ var server = app.listen(PORT, '0.0.0.0', function() {
     if (followupPollBusy) return;
     followupPollBusy = true;
     runPendingFollowups()
-      .catch(function(e) { console.error('followup poll error:', e.message); })
+      .catch(function(e) { console.error('followup poll error:', waErrorDetail(e)); })
       .finally(function() { followupPollBusy = false; });
   }, WP_FOLLOWUP_POLL_MS);
 
   setTimeout(function() {
-    runPendingFollowups().catch(function(e) { console.error('followup startup poll:', e.message); });
-  }, 20000);
+    runPendingFollowups().catch(function(e) { console.error('followup startup poll:', waErrorDetail(e)); });
+  }, 5000);
 });
 server.keepAliveTimeout = 120000;
 server.headersTimeout = 120000;
